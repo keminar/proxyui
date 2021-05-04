@@ -5,6 +5,9 @@
 #include "ProxyUI.h"
 #include <ShellAPI.h>
 #include <Shlwapi.h>
+#include "commctrl.h"
+#include <windows.h>
+#include "wininet.h"
 
 #define MAX_LOADSTRING 100
 
@@ -12,6 +15,8 @@
 HINSTANCE hInst;                                // 当前实例
 WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
+WCHAR ProxyText[255] = { 0 }; // 代理变量
+WCHAR lanName[255] = { 0 }; // 网络连接
 
 // 此代码模块中包含的函数的前向声明: 
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -20,8 +25,19 @@ LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 #pragma comment(lib, "shlwapi.lib")
+#pragma comment(lib, "wininet.lib")
 
 #define WM_CLICKBIT (WM_USER + 1)
+
+HWND hWndComboBox, hWndBtn1;
+#define IDC_PROXY_SERVER 100
+#define IDC_PROXY_OK 101
+
+#define CloseProxy TEXT("取消代理")
+#define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+
+BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
+BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -104,7 +120,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+      CW_USEDEFAULT, CW_USEDEFAULT, 600, 500, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -117,6 +133,13 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
+// 更新全局变量
+void updateProxyText()
+{
+	int idx_row;
+	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
+	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)ProxyText);
+}
 //
 //  函数: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -131,12 +154,58 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+	case WM_CREATE:
+		{
+			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				10, 10, 100, 30,
+				hWnd, NULL, NULL, NULL);
+			hWndComboBox = CreateWindowEx(WS_EX_STATICEDGE, L"COMBOBOX", L"下拉框",
+				CBS_DROPDOWN | CBS_HASSTRINGS | WS_VISIBLE | WS_CHILD | WS_BORDER,
+				120, 10, 300, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
+			hWndBtn1 = CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"确定",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				430, 10, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
+ 
+			//  ADD 2 ITEMS
+			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
+			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)TEXT("http=127.0.0.1:3000;https=127.0.0.1:3000"));
+			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)TEXT("http=127.0.0.1:8888;https=127.0.0.1:8888"));
+
+			//  SEND THE CB_SETCURSEL MESSAGE TO DISPLAY AN INITIAL ITEM IN SELECTION FIELD
+			SendMessageW(hWndComboBox, CB_SETCURSEL, 0, (LPARAM)0);
+			updateProxyText();
+		}
+		break;
     case WM_COMMAND:
         {
             int wmId = LOWORD(wParam);
             // 分析菜单选择: 
             switch (wmId)
             {
+			case IDC_PROXY_SERVER:
+				{
+					switch (HIWORD(wParam))
+					{
+					case CBN_SELCHANGE:
+						updateProxyText();
+						break;
+					}
+				}
+				break;
+			case IDC_PROXY_OK:
+				{
+					if (strcmp((const char*)ProxyText, (const char*)CloseProxy) == 0) {
+						DisableConnectionProxy(hWnd, (LPWSTR)lanName);
+						MessageBox(hWnd, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
+					}
+					else {
+						SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)ProxyText);
+						MessageBox(hWnd, (LPCWSTR)ProxyText, TEXT("代理设置如下"), MB_OK);
+					}
+				}
+				break;
 			case IDM_START:
 				{
 					BOOL AutoStart = false;
@@ -191,7 +260,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	{
 		switch (lParam)
 		{
-		case WM_LBUTTONDBLCLK://双击托盘图标还源窗口
+		case WM_LBUTTONUP://托盘图标还原窗口
 			ShowWindow(hWnd, SW_SHOWNORMAL);
 			DestroyTrayIcon(hWnd);
 			break;
@@ -226,8 +295,8 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 
-
-BOOL SetAutoRun(HWND hwnd) //开机自动运行 
+//开机自动运行 
+BOOL SetAutoRun(HWND hwnd)
 {
 	//得到程序本身路径
 	WCHAR sthPath[MAX_PATH];
@@ -237,7 +306,7 @@ BOOL SetAutoRun(HWND hwnd) //开机自动运行
 	WCHAR str[MAX_PATH];
 	HKEY hRegKey;
 	BOOL bResult;
-	lstrcpy(str, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+	lstrcpy(str, RegRun);
 	if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, str, 0, KEY_ALL_ACCESS, &hRegKey) != ERROR_SUCCESS) {
 		bResult = FALSE;
 	}
@@ -255,12 +324,13 @@ BOOL SetAutoRun(HWND hwnd) //开机自动运行
 	return bResult;
 }
 
-BOOL SetNoAutoRun(HWND hwnd) //关闭开机自动运行 
+//关闭开机自动运行 
+BOOL SetNoAutoRun(HWND hwnd)
 {
 	WCHAR str[MAX_PATH];
 	HKEY hRegKey;
 	BOOL bResult;
-	lstrcpy(str, L"Software\\Microsoft\\Windows\\CurrentVersion\\Run");
+	lstrcpy(str, RegRun);
 	if (RegOpenKeyEx(HKEY_LOCAL_MACHINE, str, 0, KEY_ALL_ACCESS, &hRegKey) != ERROR_SUCCESS) {
 		bResult = FALSE;
 	}
@@ -279,8 +349,8 @@ BOOL SetNoAutoRun(HWND hwnd) //关闭开机自动运行
 
 }
 
-
-void BuildTrayIcon(HWND hwnd) //最小化到托盘 
+//最小化到托盘 
+void BuildTrayIcon(HWND hwnd)
 {
 
 	NOTIFYICONDATA notifyIconData;
@@ -291,14 +361,14 @@ void BuildTrayIcon(HWND hwnd) //最小化到托盘
 		MAKEINTRESOURCE(IDI_PROXYUI));
 	notifyIconData.uID = IDI_PROXYUI;
 	notifyIconData.hWnd = hwnd;
-	notifyIconData.uCallbackMessage = WM_CLICKBIT; //自定义消息,在Myfunction.h中定义
-	lstrcpy(notifyIconData.szTip, TEXT("倒计时"));
+	notifyIconData.uCallbackMessage = WM_CLICKBIT; //自定义消息
+	lstrcpy(notifyIconData.szTip, TEXT("ProxyUI"));
 
-	notifyIconData.dwState =
-		notifyIconData.uTimeout = 5000/*超时毫秒数*/;
+	notifyIconData.dwState = NIS_SHAREDICON;
+	notifyIconData.uTimeout = 1000/*超时毫秒数*/;
 	notifyIconData.dwInfoFlags = NIIF_NONE;
-	lstrcpy(notifyIconData.szInfoTitle, TEXT("托盘化;-)："));
-	lstrcpy(notifyIconData.szInfo, TEXT("没有关闭哦。 嘿嘿~~~"));
+	lstrcpy(notifyIconData.szInfoTitle, TEXT("托盘最小化;-)："));
+	lstrcpy(notifyIconData.szInfo, TEXT("如需退出，请点击\"操作->退出\"。 嘿嘿~~~"));
 
 	Shell_NotifyIcon(NIM_ADD, &notifyIconData);
 }
@@ -312,4 +382,88 @@ void DestroyTrayIcon(HWND hwnd)
 	notifyIconData.uID = IDI_PROXYUI;
 	notifyIconData.hWnd = hwnd;
 	Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
+}
+
+
+// 设置代理
+BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr)
+{
+	//conn_name: active connection name. 
+	//proxy_full_addr : eg "210.78.22.87:8000"
+	INTERNET_PER_CONN_OPTION_LIST list;
+	BOOL    bReturn;
+	DWORD   dwBufSize = sizeof(list);
+	// Fill out list struct.
+	list.dwSize = sizeof(list);
+	// NULL == LAN, otherwise connectoid name.
+	list.pszConnection = conn_name;
+	// Set three options.
+	list.dwOptionCount = 2;//3;
+	list.pOptions = new INTERNET_PER_CONN_OPTION[2/*3*/];
+	// Make sure the memory was allocated.
+	if (NULL == list.pOptions)
+	{
+		// Return FALSE if the memory wasn't allocated.
+		MessageBox(hWnd, TEXT("failed to allocat memory in SetConnectionOptions()"), TEXT("失败"), MB_OK);
+		return FALSE;
+	}
+	// Set flags.
+	list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+	list.pOptions[0].Value.dwValue = PROXY_TYPE_DIRECT |
+		PROXY_TYPE_PROXY;
+
+	// Set proxy name.
+	list.pOptions[1].dwOption = INTERNET_PER_CONN_PROXY_SERVER;
+	list.pOptions[1].Value.pszValue = proxy_full_addr;//"http://proxy:80";
+
+													  /*
+													  // Set proxy override.
+													  list.pOptions[2].dwOption = INTERNET_PER_CONN_PROXY_BYPASS;
+													  list.pOptions[2].Value.pszValue = "local";
+													  */
+
+													  // Set the options on the connection.
+	bReturn = InternetSetOption(NULL,
+		INTERNET_OPTION_PER_CONNECTION_OPTION, &list, dwBufSize);
+
+	// Free the allocated memory.
+	delete[] list.pOptions;
+
+	InternetSetOption(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
+	InternetSetOption(NULL, INTERNET_OPTION_REFRESH, NULL, 0);
+	return bReturn;
+}
+
+// 取消代理
+BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name)
+{
+	//conn_name: active connection name. 
+	INTERNET_PER_CONN_OPTION_LIST list;
+	BOOL    bReturn;
+	DWORD   dwBufSize = sizeof(list);
+	// Fill out list struct.
+	list.dwSize = sizeof(list);
+	// NULL == LAN, otherwise connectoid name.
+	list.pszConnection = conn_name;
+	// Set three options.
+	list.dwOptionCount = 1;
+	list.pOptions = new INTERNET_PER_CONN_OPTION[list.dwOptionCount];
+	// Make sure the memory was allocated.
+	if (NULL == list.pOptions)
+	{
+		// Return FALSE if the memory wasn't allocated.
+		MessageBox(hWnd, TEXT("failed to allocat memory in DisableConnectionProxy()"), TEXT("失败"), MB_OK);
+		return FALSE;
+	}
+	// Set flags.
+	list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+	list.pOptions[0].Value.dwValue = PROXY_TYPE_DIRECT;
+	// Set the options on the connection.
+	bReturn = InternetSetOption(NULL,
+		INTERNET_OPTION_PER_CONNECTION_OPTION, &list, dwBufSize);
+	// Free the allocated memory.
+	delete[] list.pOptions;
+	InternetSetOption(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
+	InternetSetOption(NULL, INTERNET_OPTION_REFRESH, NULL, 0);
+	return bReturn;
 }
