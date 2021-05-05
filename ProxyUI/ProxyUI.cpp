@@ -37,6 +37,7 @@ HWND hWndComboBox, hWndBtn1;
 #define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define RegName L"ProxyUI"
 #define IniFile L".\\ProxyUI.ini"
+#define maxLen 1024
 
 BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
 BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name);
@@ -173,11 +174,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			//  ADD 2 ITEMS
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
 
-			TCHAR inBuf[255];
-			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, 255,IniFile);
-			if (strnlen_s((const char*)inBuf, 255) == 0) {//无文件，创建文件
+			TCHAR inBuf[maxLen];
+			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen,IniFile);
+			if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
 				WritePrivateProfileString(L"Server", L"List", L"http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888", IniFile);
-				GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, 255, IniFile);
+				GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, IniFile);
 			}
 			// 分割字符串，并添加Items
 			wchar_t *buffer;
@@ -315,7 +316,7 @@ BOOL SetAutoRun(HWND hwnd)
 	//得到程序本身路径
 	WCHAR sthPath[MAX_PATH];
 	GetModuleFileName(NULL, sthPath, MAX_PATH);
-	//MessageBox(NULL, sthPath, "path", MB_OK);
+	//MessageBox(NULL, sthPath, TEXT("path"), MB_OK);
 
 	WCHAR str[MAX_PATH];
 	HKEY hRegKey;
@@ -325,7 +326,8 @@ BOOL SetAutoRun(HWND hwnd)
 		bResult = FALSE;
 	}
 	else {
-		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)sthPath, lstrlen(sthPath) + 1) != ERROR_SUCCESS) {
+		//wcslen 返回的是字符串中的字符数, 在 UNICODE 编码中，一个字符占2个字节
+		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)sthPath, wcslen(sthPath) * 2) != ERROR_SUCCESS) {
 			bResult = FALSE;
 		}
 		else {
