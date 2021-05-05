@@ -35,6 +35,8 @@ HWND hWndComboBox, hWndBtn1;
 
 #define CloseProxy TEXT("取消代理")
 #define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+#define RegName L"ProxyUI"
+#define IniFile L".\\ProxyUI.ini"
 
 BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
 BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name);
@@ -170,8 +172,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
  
 			//  ADD 2 ITEMS
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
-			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)TEXT("http=127.0.0.1:3000;https=127.0.0.1:3000"));
-			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)TEXT("http=127.0.0.1:8888;https=127.0.0.1:8888"));
+
+			TCHAR inBuf[255];
+			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, 255,IniFile);
+			if (strnlen_s((const char*)inBuf, 255) == 0) {//无文件，创建文件
+				WritePrivateProfileString(L"Server", L"List", L"http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888", IniFile);
+				GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, 255, IniFile);
+			}
+			// 分割字符串，并添加Items
+			wchar_t *buffer;
+			wchar_t *token = wcstok_s(inBuf, L"|", &buffer);
+			while (token) {
+				SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)token);
+				token = wcstok_s(NULL, L"|", &buffer);
+			}
 
 			//  SEND THE CB_SETCURSEL MESSAGE TO DISPLAY AN INITIAL ITEM IN SELECTION FIELD
 			SendMessageW(hWndComboBox, CB_SETCURSEL, 0, (LPARAM)0);
@@ -311,8 +325,7 @@ BOOL SetAutoRun(HWND hwnd)
 		bResult = FALSE;
 	}
 	else {
-
-		if (RegSetValueEx(hRegKey, L"ProxyUI", 0, REG_SZ, (BYTE*)sthPath, lstrlen(sthPath) + 1) != ERROR_SUCCESS) {
+		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)sthPath, lstrlen(sthPath) + 1) != ERROR_SUCCESS) {
 			bResult = FALSE;
 		}
 		else {
@@ -335,8 +348,7 @@ BOOL SetNoAutoRun(HWND hwnd)
 		bResult = FALSE;
 	}
 	else {
-
-		if (RegDeleteValue(hRegKey, L"ProxyUI") != ERROR_SUCCESS) {
+		if (RegDeleteValue(hRegKey, RegName) != ERROR_SUCCESS) {
 			bResult = FALSE;
 		}
 		else {
@@ -344,15 +356,12 @@ BOOL SetNoAutoRun(HWND hwnd)
 		}
 		RegCloseKey(hRegKey);
 	}
-
 	return bResult;
-
 }
 
 //最小化到托盘 
 void BuildTrayIcon(HWND hwnd)
 {
-
 	NOTIFYICONDATA notifyIconData;
 	ZeroMemory(&notifyIconData, sizeof(notifyIconData));
 	notifyIconData.cbSize = sizeof(notifyIconData);
@@ -416,13 +425,13 @@ BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr)
 	list.pOptions[1].dwOption = INTERNET_PER_CONN_PROXY_SERVER;
 	list.pOptions[1].Value.pszValue = proxy_full_addr;//"http://proxy:80";
 
-													  /*
-													  // Set proxy override.
-													  list.pOptions[2].dwOption = INTERNET_PER_CONN_PROXY_BYPASS;
-													  list.pOptions[2].Value.pszValue = "local";
-													  */
+	/*
+	// Set proxy override.
+	list.pOptions[2].dwOption = INTERNET_PER_CONN_PROXY_BYPASS;
+	list.pOptions[2].Value.pszValue = "local";
+	*/
 
-													  // Set the options on the connection.
+	// Set the options on the connection.
 	bReturn = InternetSetOption(NULL,
 		INTERNET_OPTION_PER_CONNECTION_OPTION, &list, dwBufSize);
 
