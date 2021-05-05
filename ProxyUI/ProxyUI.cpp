@@ -33,7 +33,7 @@ HWND hWndComboBox, hWndBtn1;
 #define IDC_PROXY_SERVER 100
 #define IDC_PROXY_OK 101
 
-#define CloseProxy TEXT("取消代理")
+#define CloseProxy TEXT("无代理")
 #define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define RegName L"ProxyUI"
 #define IniFile L".\\ProxyUI.ini"
@@ -122,7 +122,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, CW_USEDEFAULT, 600, 500, nullptr, nullptr, hInstance, nullptr);
+      CW_USEDEFAULT, CW_USEDEFAULT, 630, 500, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -164,10 +164,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				hWnd, NULL, NULL, NULL);
 			hWndComboBox = CreateWindowEx(WS_EX_STATICEDGE, L"COMBOBOX", L"下拉框",
 				CBS_DROPDOWN | CBS_HASSTRINGS | WS_VISIBLE | WS_CHILD | WS_BORDER,
-				120, 10, 300, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
+				120, 10, 350, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
 			hWndBtn1 = CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"确定",
 				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				430, 10, 100, 30,
+				480, 10, 100, 30,
 				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
  
 			//  ADD 2 ITEMS
