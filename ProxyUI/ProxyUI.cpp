@@ -8,6 +8,8 @@
 #include "commctrl.h"
 #include <windows.h>
 #include "wininet.h"
+#include <atlstr.h>
+#include <Commdlg.h>
 
 #define MAX_LOADSTRING 100
 
@@ -17,6 +19,8 @@ WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 WCHAR ProxyText[255] = { 0 }; // 代理变量
 WCHAR lanName[255] = { 0 }; // 网络连接
+WCHAR filePath[MAX_PATH];
+CString dirPath;
 
 // 此代码模块中包含的函数的前向声明: 
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -30,13 +34,11 @@ INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 #define WM_CLICKBIT (WM_USER + 1)
 
 HWND hWndComboBox, hWndBtn1;
-#define IDC_PROXY_SERVER 100
-#define IDC_PROXY_OK 101
+HWND hfDlg;
 
 #define CloseProxy TEXT("无代理")
 #define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define RegName L"ProxyUI"
-#define IniFile L".\\ProxyUI.ini"
 #define maxLen 1024
 
 BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
@@ -122,6 +124,11 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
+   //得到程序本身路径
+   GetModuleFileName(NULL, filePath, MAX_PATH);
+   dirPath = filePath;
+   dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
+
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, CW_USEDEFAULT, 630, 500, nullptr, nullptr, hInstance, nullptr);
 
@@ -159,7 +166,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
 	case WM_CREATE:
 		{
-			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
+			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"  系统代理",
 				WS_VISIBLE | WS_CHILD | WS_BORDER,
 				10, 10, 100, 30,
 				hWnd, NULL, NULL, NULL);
@@ -171,14 +178,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				480, 10, 100, 30,
 				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
  
-			//  ADD 2 ITEMS
+			// 添加默认代理
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
 
 			TCHAR inBuf[maxLen];
-			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen,IniFile);
+			CString iniFile;
+			iniFile = dirPath + L"ProxyUI.ini";
+			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, iniFile);
 			if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
-				WritePrivateProfileString(L"Server", L"List", L"http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888", IniFile);
-				GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, IniFile);
+				WritePrivateProfileString(L"Server", L"List", L"http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888", iniFile);
+				GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, iniFile);
 			}
 			// 分割字符串，并添加Items
 			wchar_t *buffer;
@@ -188,9 +197,52 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				token = wcstok_s(NULL, L"|", &buffer);
 			}
 
-			//  SEND THE CB_SETCURSEL MESSAGE TO DISPLAY AN INITIAL ITEM IN SELECTION FIELD
+			// 选中第一个值
 			SendMessageW(hWndComboBox, CB_SETCURSEL, 0, (LPARAM)0);
 			updateProxyText();
+
+			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"    程序1",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				10, 60, 100, 30,
+				hWnd, NULL, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"EDIT", L"",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				120, 60, 350, 30, hWnd, (HMENU)IDC_PROXY_CMD1, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"浏览...",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				480, 60, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_FILE1, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"启动",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				370, 100, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_START1, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"停止",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				480, 100, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_STOP1, NULL, NULL);
+
+			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"    程序2",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				10, 140, 100, 30,
+				hWnd, NULL, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"EDIT", L"",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				120, 140, 350, 30, hWnd, (HMENU)IDC_PROXY_CMD2, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"浏览...",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				480, 140, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_FILE2, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"启动",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				370, 180, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_START2, NULL, NULL);
+			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"停止",
+				WS_VISIBLE | WS_CHILD | WS_BORDER,
+				480, 180, 100, 30,
+				hWnd, (HMENU)IDC_PROXY_STOP2, NULL, NULL);
+
+			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, NULL);
+			ShowWindow(hfDlg, SW_SHOW);
 		}
 		break;
     case WM_COMMAND:
@@ -219,6 +271,59 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)ProxyText);
 						MessageBox(hWnd, (LPCWSTR)ProxyText, TEXT("代理设置如下"), MB_OK);
 					}
+				}
+				break;
+			case IDC_PROXY_FILE1:
+				{
+					OPENFILENAME opfn;
+					WCHAR strFilename[MAX_PATH];//存放文件名
+												//初始化
+					ZeroMemory(&opfn, sizeof(OPENFILENAME));
+					opfn.lStructSize = sizeof(OPENFILENAME);//结构体大小
+															//设置过滤
+					opfn.lpstrFilter = L"所有文件\0*.*\0可执行文件\0*.exe\0";
+					//默认过滤器索引设为1
+					opfn.nFilterIndex = 1;
+					//文件名的字段必须先把第一个字符设为 \0
+					opfn.lpstrFile = strFilename;
+					opfn.lpstrFile[0] = '\0';
+					opfn.nMaxFile = sizeof(strFilename);
+					//设置标志位，检查目录或文件是否存在
+					opfn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+					//opfn.lpstrInitialDir = NULL;
+					// 显示对话框让用户选择文件
+					if (GetOpenFileName(&opfn))
+					{
+						//在文本框中显示文件路径
+						HWND hEdt = GetDlgItem(hWnd, IDC_PROXY_CMD1);
+						SendMessage(hEdt, WM_SETTEXT, NULL, (LPARAM)strFilename);
+					}
+				}
+				break;
+			case IDC_PROXY_START1:
+				{
+					
+
+				}
+				break;
+			case IDC_PROXY_STOP1:
+				{
+
+				}
+				break;
+			case IDC_PROXY_FILE2:
+				{
+
+				}
+				break;
+			case IDC_PROXY_START2:
+				{
+
+				}
+				break;
+			case IDC_PROXY_STOP2:
+				{
+
 				}
 				break;
 			case IDM_START:
@@ -313,10 +418,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 //开机自动运行 
 BOOL SetAutoRun(HWND hwnd)
 {
-	//得到程序本身路径
-	WCHAR sthPath[MAX_PATH];
-	GetModuleFileName(NULL, sthPath, MAX_PATH);
-	//MessageBox(NULL, sthPath, TEXT("path"), MB_OK);
+	//MessageBox(NULL, filePath, TEXT("path"), MB_OK);
 
 	WCHAR str[MAX_PATH];
 	HKEY hRegKey;
@@ -327,7 +429,7 @@ BOOL SetAutoRun(HWND hwnd)
 	}
 	else {
 		//wcslen 返回的是字符串中的字符数, 在 UNICODE 编码中，一个字符占2个字节
-		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)sthPath, wcslen(sthPath) * 2) != ERROR_SUCCESS) {
+		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)filePath, wcslen(filePath) * 2) != ERROR_SUCCESS) {
 			bResult = FALSE;
 		}
 		else {
@@ -368,7 +470,7 @@ void BuildTrayIcon(HWND hwnd)
 	ZeroMemory(&notifyIconData, sizeof(notifyIconData));
 	notifyIconData.cbSize = sizeof(notifyIconData);
 	notifyIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_INFO;
-	notifyIconData.hIcon = LoadIcon((HINSTANCE)GetWindowLong(hwnd, GWL_HINSTANCE),
+	notifyIconData.hIcon = LoadIcon((HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
 		MAKEINTRESOURCE(IDI_PROXYUI));
 	notifyIconData.uID = IDI_PROXYUI;
 	notifyIconData.hWnd = hwnd;
