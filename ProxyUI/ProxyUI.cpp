@@ -154,7 +154,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 // 更新全局变量
 void updateProxyText()
 {
-	int idx_row;
+	LRESULT idx_row;
 	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
 	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)ProxyText);
 }
@@ -586,7 +586,7 @@ BOOL SetAutoRun(HWND hwnd)
 	}
 	else {
 		//wcslen 返回的是字符串中的字符数, 在 UNICODE 编码中，一个字符占2个字节
-		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)filePath, wcslen(filePath) * 2) != ERROR_SUCCESS) {
+		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)filePath, (DWORD)wcslen(filePath) * 2) != ERROR_SUCCESS) {
 			bResult = FALSE;
 		}
 		else {
