@@ -209,7 +209,7 @@ void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 }
 void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString)
 {
-	TCHAR inBuf[maxLen];
+	//TCHAR inBuf[maxLen];
 	CString iniFile;
 	iniFile = dirPath + L"ProxyUI.ini";
 	//GetPrivateProfileString(lpAppName, lpKeyName, TEXT(""), inBuf, maxLen, iniFile);
@@ -375,7 +375,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					//MessageBox(hdlg, ProxyExe2, TEXT("失败"), MB_OK);
 
 					// 是否选中后台
-					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
+					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
 					startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED);
 					writeIni(TEXT("Program"), TEXT("app2"), ProxyExe2);
 					writeIni(TEXT("Program"), TEXT("param2"), Params);
