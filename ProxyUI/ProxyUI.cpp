@@ -333,16 +333,18 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
 						break;
 					}
+					// 先把变量写入
+					writeIni(TEXT("Program"), TEXT("app1"), ProxyExe1);
+
 					WCHAR Params[MAX_PATH] = { 0 };
 					GetDlgItemText(hdlg, IDC_EDIT2, (LPTSTR)Params, MAX_PATH);
+					writeIni(TEXT("Program"), TEXT("param1"), Params);
 
 					lstrcat(ProxyExe1, TEXT(" "));
 					lstrcat(ProxyExe1, Params);
 					// 是否选中后台
 					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
 					startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED);
-					writeIni(TEXT("Program"), TEXT("app1"), ProxyExe1);
-					writeIni(TEXT("Program"), TEXT("param1"), Params);
 					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 				}
@@ -367,8 +369,11 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
 						break;
 					}
+					writeIni(TEXT("Program"), TEXT("app2"), ProxyExe2);
+
 					WCHAR Params[MAX_PATH] = { 0 };
 					GetDlgItemText(hdlg, IDC_EDIT4, (LPTSTR)Params, MAX_PATH);
+					writeIni(TEXT("Program"), TEXT("param2"), Params);
 
 					lstrcat(ProxyExe2, TEXT(" "));
 					lstrcat(ProxyExe2, Params);
@@ -377,8 +382,6 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					// 是否选中后台
 					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
 					startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED);
-					writeIni(TEXT("Program"), TEXT("app2"), ProxyExe2);
-					writeIni(TEXT("Program"), TEXT("param2"), Params);
 					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 				}
@@ -509,6 +512,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
             case IDM_EXIT:
+				// 检查进程是否在
+				if (pro_info.hProcess > 0 || pro_info2.hProcess > 0) {
+					MessageBox(hWnd, TEXT("先停止启动的程序再退出"), TEXT("失败"), MB_OK);
+					break;
+				}
                 DestroyWindow(hWnd);
                 break;
             default:
