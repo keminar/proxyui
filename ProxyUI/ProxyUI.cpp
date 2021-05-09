@@ -12,6 +12,7 @@
 #include <Commdlg.h>
 #include <TlHelp32.h>
 #include <sstream>
+#include <string.h> 
 
 #define MAX_LOADSTRING 100
 
@@ -24,15 +25,8 @@ WCHAR lanName[255] = { 0 }; // 网络连接
 WCHAR filePath[MAX_PATH];
 CString dirPath;
 
-
 PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
-
-// 此代码模块中包含的函数的前向声明: 
-ATOM                MyRegisterClass(HINSTANCE hInstance);
-BOOL                InitInstance(HINSTANCE, int);
-LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "wininet.lib")
@@ -45,10 +39,9 @@ HWND hfDlg;
 #define CloseProxy TEXT("无代理")
 #define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define RegName L"ProxyUI"
+#define IniName L"ProxyUI.ini"
+//读取最大长度
 #define maxLen 1024
-
-BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
-BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -147,134 +140,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
-// 更新全局变量
-void updateProxyText()
-{
-	LRESULT idx_row;
-	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
-	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)ProxyText);
-}
-
-// 选择文件
-void selectApplication(HWND hWnd, int nIDDlgItem)
-{
-	OPENFILENAME opfn;
-	WCHAR strFilename[MAX_PATH];//存放文件名
-								//初始化
-	ZeroMemory(&opfn, sizeof(OPENFILENAME));
-	opfn.lStructSize = sizeof(OPENFILENAME);//结构体大小
-											//设置过滤
-	opfn.lpstrFilter = L"所有文件\0*.*\0可执行文件\0*.exe\0";
-	//默认过滤器索引设为1
-	opfn.nFilterIndex = 1;
-	//文件名的字段必须先把第一个字符设为 \0
-	opfn.lpstrFile = strFilename;
-	opfn.lpstrFile[0] = '\0';
-	opfn.nMaxFile = sizeof(strFilename);
-	//设置标志位，检查目录或文件是否存在
-	opfn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-	//opfn.lpstrInitialDir = NULL;
-	// 显示对话框让用户选择文件
-	if (GetOpenFileName(&opfn))
-	{
-		//在文本框中显示文件路径
-		HWND hEdt = GetDlgItem(hWnd, nIDDlgItem);
-		SendMessage(hEdt, WM_SETTEXT, NULL, (LPARAM)strFilename);
-	}
-}
-void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
-{
-	// 检查进程是否在
-	if ((*process).hProcess > 0) {
-		MessageBox(hWnd, TEXT("先停止再启动"), TEXT("失败"), MB_OK);
-		return;
-	}
-
-	STARTUPINFO sti; //启动信息   
-	ZeroMemory(process, sizeof(PROCESS_INFORMATION));
-	ZeroMemory(&sti, sizeof(STARTUPINFO));
-	sti.cb = sizeof(sti);
-	if (!show) {
-		sti.dwFlags = STARTF_USESHOWWINDOW;
-		sti.wShowWindow = SW_HIDE;
-	}
-	//第二个参数是第一个命令要接收的参数
-	BOOL bRet = FALSE;
-	bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, NULL, &sti, process);
-	if (!bRet)
-	{
-		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
-		return;
-	}
-}
-void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString)
-{
-	//TCHAR inBuf[maxLen];
-	CString iniFile;
-	iniFile = dirPath + L"ProxyUI.ini";
-	//GetPrivateProfileString(lpAppName, lpKeyName, TEXT(""), inBuf, maxLen, iniFile);
-	//if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
-		WritePrivateProfileString(lpAppName, lpKeyName, lpString, iniFile);
-	//}
-}
-
-
-// 发送CLOSE消息
-BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam)
-{
-	DWORD dwID;
-	GetWindowThreadProcessId(hwnd, &dwID);
-	if (dwID == (DWORD)lParam) {
-		PostMessage(hwnd, WM_CLOSE, 0, 0);
-	}
-	return TRUE;
-}
-
-void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
-{
-	// 检查进程是否在
-	if ((*process).hProcess == 0) {
-		MessageBox(hWnd, TEXT("没有进程"), TEXT("失败"), MB_OK);
-		return;
-	}
-
-	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
-	if (hProc == NULL) {
-		return;
-	}
-
-	//bat文件采用这种可以关闭, bat的还要写在前面
-	// 发送CLOSE消息关闭，针对bat有效
-	EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)(*process).dwProcessId);
-
-	/*
-	// 另一种发送CLOSE方法
-	std::wostringstream oss;
-	oss.str(_T(""));
-	oss << _T("/PID ");
-	oss << pro_info.dwProcessId;
-	std::wstring strCmd = oss.str();
-	ShellExecute(NULL, _T("OPEN"), _T("taskkill.exe"), strCmd.c_str(), _T(""), SW_HIDE);
-	*/
-
-	//不加停顿bat会关不掉
-	///Sleep(1000);
-	// 等待Milliseconds，如果不行杀进程，对exe有效果
-	if (WaitForSingleObject(hProc, 1000) != WAIT_OBJECT_0) {
-		//exe文件采用这种可以关闭
-		DWORD dwExitCode = 0;
-		// 获取子进程的退出码 
-		GetExitCodeProcess((*process).hProcess, &dwExitCode);
-		TerminateProcess((*process).hProcess, dwExitCode);//终止进程
-	}
-
-	// 关闭子进程的主线程句柄 
-	CloseHandle((*process).hThread);
-	// 关闭子进程句柄 
-	CloseHandle((*process).hProcess);
-	(*process).hProcess = 0;
-}
-
 //FORMVIEW 回调消息
 LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -288,10 +153,10 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 			//默认值
 			HWND hCmd1;
 			CString iniFile;
-			TCHAR inBuf1[maxLen];
-			iniFile = dirPath + L"ProxyUI.ini";
+			TCHAR inBuf1[MAX_PATH];
+			iniFile = dirPath + IniName;
 
-			GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, maxLen, iniFile);
+			GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 			hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD1);
 			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
@@ -300,7 +165,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 			
 
-			GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), inBuf1, maxLen, iniFile);
+			GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 			hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD2);
 			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
@@ -329,7 +194,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				{
 					WCHAR ProxyExe1[MAX_PATH] = { 0 };
 					GetDlgItemText(hdlg, IDC_PROXY_CMD1, (LPTSTR)ProxyExe1, MAX_PATH);
-					if (strcmp((const char*)ProxyExe1, "") == 0) {
+					if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)"") == 0) {
 						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
 						break;
 					}
@@ -365,7 +230,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				{
 					WCHAR ProxyExe2[MAX_PATH] = { 0 };
 					GetDlgItemText(hdlg, IDC_PROXY_CMD2, (LPTSTR)ProxyExe2, MAX_PATH);
-					if (strcmp((const char*)ProxyExe2, "") == 0) {
+					if (wcscmp((const wchar_t*)ProxyExe2, (const wchar_t*)"") == 0) {
 						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
 						break;
 					}
@@ -428,27 +293,43 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				480, 10, 100, 30,
 				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
  
-			// 添加默认代理
+			// 添加默认代理选项
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
 
 			TCHAR inBuf[maxLen];
 			CString iniFile;
-			iniFile = dirPath + L"ProxyUI.ini";
+			iniFile = dirPath + IniName;
 			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, iniFile);
-			if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
+			if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)"") == 0) {//无文件，创建文件
 				WritePrivateProfileString(L"Server", L"List", L"http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888", iniFile);
 				GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, iniFile);
 			}
+
+			//获取系统设置
+			GetConnectProxy(hWnd, (LPWSTR)lanName);
 			// 分割字符串，并添加Items
 			wchar_t *buffer;
 			wchar_t *token = wcstok_s(inBuf, L"|", &buffer);
+			int i = 1;
+			int j = 0;
 			while (token) {
 				SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)token);
+				if (wcscmp((const wchar_t*)token, (const wchar_t*)ProxyText) == 0) {
+					j = i;
+				}
+				i++;
 				token = wcstok_s(NULL, L"|", &buffer);
 			}
 
-			// 选中第一个值
-			SendMessageW(hWndComboBox, CB_SETCURSEL, 0, (LPARAM)0);
+			if (j == 0 && wcscmp((const wchar_t*)ProxyText, (const wchar_t*)"") != 0) { //有设置代理，但不在已经配置的列表
+				// 填充下拉菜单并选中
+				SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)ProxyText);
+				SendMessageW(hWndComboBox, CB_SETCURSEL, i, (LPARAM)0);
+			}
+			else {
+				// 设置选中
+				SendMessageW(hWndComboBox, CB_SETCURSEL, j, (LPARAM)0);
+			}
 			updateProxyText();
 			
 			// 插入FORMVIEW
@@ -474,7 +355,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				break;
 			case IDC_PROXY_OK:
 				{
-					if (strcmp((const char*)ProxyText, (const char*)CloseProxy) == 0) {
+					if (wcscmp((const wchar_t*)ProxyText, (const wchar_t*)CloseProxy) == 0) {
 						DisableConnectionProxy(hWnd, (LPWSTR)lanName);
 						MessageBox(hWnd, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
 					}
@@ -661,7 +542,7 @@ void DestroyTrayIcon(HWND hwnd)
 }
 
 
-// 设置代理
+// 设置代理 https://docs.microsoft.com/en-us/windows/win32/wininet/setting-and-retrieving-internet-options
 BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr)
 {
 	//conn_name: active connection name. 
@@ -742,4 +623,166 @@ BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name)
 	InternetSetOption(NULL, INTERNET_OPTION_SETTINGS_CHANGED, NULL, 0);
 	InternetSetOption(NULL, INTERNET_OPTION_REFRESH, NULL, 0);
 	return bReturn;
+}
+
+// 查询代理
+BOOL GetConnectProxy(HWND hWnd, LPWSTR conn_name)
+{
+	BOOL ret;
+	INTERNET_PER_CONN_OPTION_LIST list;
+	INTERNET_PER_CONN_OPTION* Option = new INTERNET_PER_CONN_OPTION[1];
+
+	DWORD   dwBufSize = sizeof(list);
+	list.dwSize = sizeof(list);
+	list.pszConnection = conn_name; // NULL;
+	list.dwOptionCount = 1;
+	list.pOptions = Option;
+
+	list.pOptions[0].dwOption = INTERNET_PER_CONN_FLAGS;
+	list.pOptions[0].Value.dwValue = 0;
+
+	ret = InternetQueryOption(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION, &list, &dwBufSize);
+	if (ret && Option[0].Value.dwValue != PROXY_TYPE_DIRECT) {
+		list.pOptions[0].dwOption = INTERNET_PER_CONN_PROXY_SERVER;
+		list.pOptions[0].Value.pszValue = 0;
+
+		ret = InternetQueryOption(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION, &list, &dwBufSize);
+
+		wcscpy_s(ProxyText, _countof(ProxyText), Option[0].Value.pszValue);
+		//MessageBox(hWnd, (LPCWSTR)Option[0].Value.pszValue, TEXT("成功"), MB_OK);
+	}
+
+	// Free the allocated memory.
+	delete[] list.pOptions;
+	return ret;
+}
+
+
+// 更新全局变量
+void updateProxyText()
+{
+	LRESULT idx_row;
+	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
+	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)ProxyText);
+}
+
+// 选择文件
+void selectApplication(HWND hWnd, int nIDDlgItem)
+{
+	OPENFILENAME opfn;
+	WCHAR strFilename[MAX_PATH];//存放文件名
+								//初始化
+	ZeroMemory(&opfn, sizeof(OPENFILENAME));
+	opfn.lStructSize = sizeof(OPENFILENAME);//结构体大小
+											//设置过滤
+	opfn.lpstrFilter = L"所有文件\0*.*\0可执行文件\0*.exe\0";
+	//默认过滤器索引设为1
+	opfn.nFilterIndex = 1;
+	//文件名的字段必须先把第一个字符设为 \0
+	opfn.lpstrFile = strFilename;
+	opfn.lpstrFile[0] = '\0';
+	opfn.nMaxFile = sizeof(strFilename);
+	//设置标志位，检查目录或文件是否存在
+	opfn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+	//opfn.lpstrInitialDir = NULL;
+	// 显示对话框让用户选择文件
+	if (GetOpenFileName(&opfn))
+	{
+		//在文本框中显示文件路径
+		HWND hEdt = GetDlgItem(hWnd, nIDDlgItem);
+		SendMessage(hEdt, WM_SETTEXT, NULL, (LPARAM)strFilename);
+	}
+}
+
+// 启动应用
+void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
+{
+	// 检查进程是否在
+	if ((*process).hProcess > 0) {
+		MessageBox(hWnd, TEXT("先停止再启动"), TEXT("失败"), MB_OK);
+		return;
+	}
+
+	STARTUPINFO sti; //启动信息   
+	ZeroMemory(process, sizeof(PROCESS_INFORMATION));
+	ZeroMemory(&sti, sizeof(STARTUPINFO));
+	sti.cb = sizeof(sti);
+	if (!show) {
+		sti.dwFlags = STARTF_USESHOWWINDOW;
+		sti.wShowWindow = SW_HIDE;
+	}
+	//第二个参数是第一个命令要接收的参数
+	BOOL bRet = FALSE;
+	bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, NULL, &sti, process);
+	if (!bRet)
+	{
+		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
+		return;
+	}
+}
+
+// 写文件
+void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString)
+{
+	CString iniFile;
+	iniFile = dirPath + IniName;
+	WritePrivateProfileString(lpAppName, lpKeyName, lpString, iniFile);
+}
+
+
+// 发送CLOSE消息
+BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam)
+{
+	DWORD dwID;
+	GetWindowThreadProcessId(hwnd, &dwID);
+	if (dwID == (DWORD)lParam) {
+		PostMessage(hwnd, WM_CLOSE, 0, 0);
+	}
+	return TRUE;
+}
+
+// 停止应用
+void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
+{
+	// 检查进程是否在
+	if ((*process).hProcess == 0) {
+		MessageBox(hWnd, TEXT("没有进程"), TEXT("失败"), MB_OK);
+		return;
+	}
+
+	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
+	if (hProc == NULL) {
+		return;
+	}
+
+	//bat文件采用这种可以关闭, bat的还要写在前面
+	// 发送CLOSE消息关闭，针对bat有效
+	EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)(*process).dwProcessId);
+
+	/*
+	// 另一种发送CLOSE方法
+	std::wostringstream oss;
+	oss.str(_T(""));
+	oss << _T("/PID ");
+	oss << pro_info.dwProcessId;
+	std::wstring strCmd = oss.str();
+	ShellExecute(NULL, _T("OPEN"), _T("taskkill.exe"), strCmd.c_str(), _T(""), SW_HIDE);
+	*/
+
+	//不加停顿bat会关不掉
+	///Sleep(1000);
+	// 等待Milliseconds，如果不行杀进程，对exe有效果
+	if (WaitForSingleObject(hProc, 1000) != WAIT_OBJECT_0) {
+		//exe文件采用这种可以关闭
+		DWORD dwExitCode = 0;
+		// 获取子进程的退出码 
+		GetExitCodeProcess((*process).hProcess, &dwExitCode);
+		TerminateProcess((*process).hProcess, dwExitCode);//终止进程
+	}
+
+	// 关闭子进程的主线程句柄 
+	CloseHandle((*process).hThread);
+	// 关闭子进程句柄 
+	CloseHandle((*process).hProcess);
+	(*process).hProcess = 0;
 }

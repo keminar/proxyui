@@ -1,7 +1,40 @@
 #pragma once
 
 #include "resource.h"
+
+// 此代码模块中包含的函数的前向声明: 
+ATOM                MyRegisterClass(HINSTANCE hInstance);
+BOOL                InitInstance(HINSTANCE, int);
+LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
+INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
+
+//FORMVIEW 回调消息
+LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam);
+//开机自动运行 
 BOOL SetAutoRun(HWND hwnd);
+//关闭开机自动运行 
 BOOL SetNoAutoRun(HWND hwnd);
+//最小化到托盘 
 void BuildTrayIcon(HWND hwnd);
+//销毁系统托盘图标 
 void DestroyTrayIcon(HWND hwnd);
+
+// 设置代理
+BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
+// 取消代理
+BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name);
+// 查询代理
+BOOL GetConnectProxy(HWND hWnd, LPWSTR conn_name);
+
+// 选择文件
+void selectApplication(HWND hWnd, int nIDDlgItem);
+// 启动应用
+void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show);
+// 停止应用
+void stopApp(HWND hWnd, PROCESS_INFORMATION* process);
+// 发送CLOSE消息
+BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam);
+// 写文件
+void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString);
+// 更新全局变量
+void updateProxyText();
