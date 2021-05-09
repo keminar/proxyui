@@ -25,10 +25,8 @@ WCHAR filePath[MAX_PATH];
 CString dirPath;
 
 
-PROCESS_INFORMATION pro_info; //进程信息  
-STARTUPINFO sti; //启动信息   
+PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
-STARTUPINFO sti2; //启动信息   
 
 // 此代码模块中包含的函数的前向声明: 
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -90,8 +88,6 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     return (int) msg.wParam;
 }
 
-
-
 //
 //  函数: MyRegisterClass()
 //
@@ -138,7 +134,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
 
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, CW_USEDEFAULT, 630, 500, nullptr, nullptr, hInstance, nullptr);
+      CW_USEDEFAULT, CW_USEDEFAULT, 660, 530, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
    {
@@ -159,28 +155,7 @@ void updateProxyText()
 	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)ProxyText);
 }
 
-
-LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
-{
-	switch (message)
-	{
-		case WM_COMMAND:
-		{
-			int wmId = LOWORD(wParam);
-			// 分析菜单选择: 
-			switch (wmId)
-			{
-			case IDC_BUTTON1:
-				//在文本框中显示文件路径
-				HWND hEdt = GetDlgItem(hdlg, IDC_EDIT1);
-				SendMessage(hEdt, WM_SETTEXT, NULL, (LPARAM)"");
-				break;
-			}
-		}
-	}
-	return 0;
-}
-
+// 选择文件
 void selectApplication(HWND hWnd, int nIDDlgItem)
 {
 	OPENFILENAME opfn;
@@ -206,6 +181,220 @@ void selectApplication(HWND hWnd, int nIDDlgItem)
 		HWND hEdt = GetDlgItem(hWnd, nIDDlgItem);
 		SendMessage(hEdt, WM_SETTEXT, NULL, (LPARAM)strFilename);
 	}
+}
+void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
+{
+	// 检查进程是否在
+	if ((*process).hProcess > 0) {
+		MessageBox(hWnd, TEXT("先停止再启动"), TEXT("失败"), MB_OK);
+		return;
+	}
+
+	STARTUPINFO sti; //启动信息   
+	ZeroMemory(process, sizeof(PROCESS_INFORMATION));
+	ZeroMemory(&sti, sizeof(STARTUPINFO));
+	sti.cb = sizeof(sti);
+	if (!show) {
+		sti.dwFlags = STARTF_USESHOWWINDOW;
+		sti.wShowWindow = SW_HIDE;
+	}
+	//第二个参数是第一个命令要接收的参数
+	BOOL bRet = FALSE;
+	bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, NULL, &sti, process);
+	if (!bRet)
+	{
+		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
+		return;
+	}
+}
+void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString)
+{
+	TCHAR inBuf[maxLen];
+	CString iniFile;
+	iniFile = dirPath + L"ProxyUI.ini";
+	//GetPrivateProfileString(lpAppName, lpKeyName, TEXT(""), inBuf, maxLen, iniFile);
+	//if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
+		WritePrivateProfileString(lpAppName, lpKeyName, lpString, iniFile);
+	//}
+}
+
+
+// 发送CLOSE消息
+BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam)
+{
+	DWORD dwID;
+	GetWindowThreadProcessId(hwnd, &dwID);
+	if (dwID == (DWORD)lParam) {
+		PostMessage(hwnd, WM_CLOSE, 0, 0);
+	}
+	return TRUE;
+}
+
+void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
+{
+	// 检查进程是否在
+	if ((*process).hProcess == 0) {
+		MessageBox(hWnd, TEXT("没有进程"), TEXT("失败"), MB_OK);
+		return;
+	}
+
+	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
+	if (hProc == NULL) {
+		return;
+	}
+
+	//bat文件采用这种可以关闭, bat的还要写在前面
+	// 发送CLOSE消息关闭，针对bat有效
+	EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)(*process).dwProcessId);
+
+	/*
+	// 另一种发送CLOSE方法
+	std::wostringstream oss;
+	oss.str(_T(""));
+	oss << _T("/PID ");
+	oss << pro_info.dwProcessId;
+	std::wstring strCmd = oss.str();
+	ShellExecute(NULL, _T("OPEN"), _T("taskkill.exe"), strCmd.c_str(), _T(""), SW_HIDE);
+	*/
+
+	//不加停顿bat会关不掉
+	///Sleep(1000);
+	// 等待Milliseconds，如果不行杀进程，对exe有效果
+	if (WaitForSingleObject(hProc, 1000) != WAIT_OBJECT_0) {
+		//exe文件采用这种可以关闭
+		DWORD dwExitCode = 0;
+		// 获取子进程的退出码 
+		GetExitCodeProcess((*process).hProcess, &dwExitCode);
+		TerminateProcess((*process).hProcess, dwExitCode);//终止进程
+	}
+
+	// 关闭子进程的主线程句柄 
+	CloseHandle((*process).hThread);
+	// 关闭子进程句柄 
+	CloseHandle((*process).hProcess);
+	(*process).hProcess = 0;
+}
+
+//FORMVIEW 回调消息
+LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{
+		case WM_PAINT:
+		{
+			PAINTSTRUCT ps;
+			HDC hdc = BeginPaint(hdlg, &ps);
+
+			//默认值
+			HWND hCmd1;
+			CString iniFile;
+			TCHAR inBuf1[maxLen];
+			iniFile = dirPath + L"ProxyUI.ini";
+
+			GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, maxLen, iniFile);
+			hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD1);
+			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
+
+			GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), inBuf1, maxLen, iniFile);
+			hCmd1 = GetDlgItem(hdlg, IDC_EDIT2);
+			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
+			
+
+			GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), inBuf1, maxLen, iniFile);
+			hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD2);
+			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
+
+			GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), inBuf1, maxLen, iniFile);
+			hCmd1 = GetDlgItem(hdlg, IDC_EDIT4);
+			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
+
+			// 默认选中
+			CheckDlgButton(hdlg, IDC_CHECK1, BST_CHECKED);
+			CheckDlgButton(hdlg, IDC_CHECK2, BST_CHECKED);
+			EndPaint(hdlg, &ps);
+		}
+		break;
+		case WM_COMMAND:
+		{
+			int wmId = LOWORD(wParam);
+			// 分析菜单选择: 
+			switch (wmId)
+			{
+				case IDC_PROXY_FILE1:
+				{
+					selectApplication(hdlg, IDC_PROXY_CMD1);
+				}
+				break;
+				case IDC_PROXY_START1:
+				{
+					WCHAR ProxyExe1[MAX_PATH] = { 0 };
+					GetDlgItemText(hdlg, IDC_PROXY_CMD1, (LPTSTR)ProxyExe1, MAX_PATH);
+					if (strcmp((const char*)ProxyExe1, "") == 0) {
+						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
+						break;
+					}
+					WCHAR Params[MAX_PATH] = { 0 };
+					GetDlgItemText(hdlg, IDC_EDIT2, (LPTSTR)Params, MAX_PATH);
+
+					lstrcat(ProxyExe1, TEXT(" "));
+					lstrcat(ProxyExe1, Params);
+					// 是否选中后台
+					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
+					startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED);
+					writeIni(TEXT("Program"), TEXT("app1"), ProxyExe1);
+					writeIni(TEXT("Program"), TEXT("param1"), Params);
+					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
+					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+				}
+				break;
+				case IDC_PROXY_STOP1:
+				{
+					stopApp(hdlg, &pro_info);
+					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
+					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+				}
+				break;
+				case IDC_PROXY_FILE2:
+				{
+					selectApplication(hdlg, IDC_PROXY_CMD2);
+				}
+				break;
+				case IDC_PROXY_START2:
+				{
+					WCHAR ProxyExe2[MAX_PATH] = { 0 };
+					GetDlgItemText(hdlg, IDC_PROXY_CMD2, (LPTSTR)ProxyExe2, MAX_PATH);
+					if (strcmp((const char*)ProxyExe2, "") == 0) {
+						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
+						break;
+					}
+					WCHAR Params[MAX_PATH] = { 0 };
+					GetDlgItemText(hdlg, IDC_EDIT4, (LPTSTR)Params, MAX_PATH);
+
+					lstrcat(ProxyExe2, TEXT(" "));
+					lstrcat(ProxyExe2, Params);
+					//MessageBox(hdlg, ProxyExe2, TEXT("失败"), MB_OK);
+
+					// 是否选中后台
+					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
+					startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED);
+					writeIni(TEXT("Program"), TEXT("app2"), ProxyExe2);
+					writeIni(TEXT("Program"), TEXT("param2"), Params);
+					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
+					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+				}
+				break;
+				case IDC_PROXY_STOP2:
+				{
+					stopApp(hdlg, &pro_info2);
+					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
+					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+				}
+				break;
+			}
+		}
+		break;
+	}
+	return 0;
 }
 
 //
@@ -258,55 +447,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			// 选中第一个值
 			SendMessageW(hWndComboBox, CB_SETCURSEL, 0, (LPARAM)0);
 			updateProxyText();
-
-			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"    程序1",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				10, 60, 100, 30,
-				hWnd, NULL, NULL, NULL);
-			HWND hEdit1 = CreateWindowEx(WS_EX_STATICEDGE, L"EDIT", L"",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				120, 60, 350, 30, hWnd, (HMENU)IDC_PROXY_CMD1, NULL, NULL);
-			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"浏览...",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				480, 60, 100, 30,
-				hWnd, (HMENU)IDC_PROXY_FILE1, NULL, NULL);
-			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"启动",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				370, 100, 100, 30,
-				hWnd, (HMENU)IDC_PROXY_START1, NULL, NULL);
-			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"停止",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				480, 100, 100, 30,
-				hWnd, (HMENU)IDC_PROXY_STOP1, NULL, NULL);
-
-			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"    程序2",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				10, 140, 100, 30,
-				hWnd, NULL, NULL, NULL);
-			HWND hEdit2 = CreateWindowEx(WS_EX_STATICEDGE, L"EDIT", L"",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				120, 140, 350, 30, hWnd, (HMENU)IDC_PROXY_CMD2, NULL, NULL);
-			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"浏览...",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				480, 140, 100, 30,
-				hWnd, (HMENU)IDC_PROXY_FILE2, NULL, NULL);
-			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"启动",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				370, 180, 100, 30,
-				hWnd, (HMENU)IDC_PROXY_START2, NULL, NULL);
-			CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"停止",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				480, 180, 100, 30,
-				hWnd, (HMENU)IDC_PROXY_STOP2, NULL, NULL);
-
-			TCHAR inBuf1[maxLen];
-			TCHAR inBuf2[maxLen];
-			iniFile = dirPath + L"ProxyUI.ini";
-			GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, maxLen, iniFile);
-			GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), inBuf2, maxLen, iniFile);
-			SendMessage(hEdit1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
-			SendMessage(hEdit2, WM_SETTEXT, NULL, (LPARAM)inBuf2);
-
+			
+			// 插入FORMVIEW
 			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, (DLGPROC)DlgProc);
 			ShowWindow(hfDlg, SW_SHOW);
 		}
@@ -337,150 +479,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)ProxyText);
 						MessageBox(hWnd, (LPCWSTR)ProxyText, TEXT("代理设置如下"), MB_OK);
 					}
-				}
-				break;
-			case IDC_PROXY_FILE1:
-				{
-					selectApplication(hWnd, IDC_PROXY_CMD1);
-				}
-				break;
-			case IDC_PROXY_START1:
-				{
-					// 检查进程是否在
-					if (pro_info.hProcess > 0) {
-						MessageBox(hWnd, TEXT("先停止再启动"), TEXT("失败"), MB_OK);
-						break;
-					}
-					WCHAR ProxyExe1[MAX_PATH] = { 0 };
-					GetDlgItemText(hWnd, IDC_PROXY_CMD1, (LPTSTR)ProxyExe1, MAX_PATH);
-					if (strcmp((const char*)ProxyExe1, "") == 0) {
-						MessageBox(hWnd, TEXT("先选择程序"), TEXT("失败"), MB_OK);
-						break;
-					}
-
-					ZeroMemory(&pro_info, sizeof(PROCESS_INFORMATION));
-					ZeroMemory(&sti, sizeof(STARTUPINFO));
-					sti.cb = sizeof(sti);
-					sti.dwFlags = STARTF_USESHOWWINDOW;
-					sti.wShowWindow = SW_HIDE;
-					//第二个参数是第一个命令要接收的参数
-					BOOL bRet = FALSE;
-					bRet  = CreateProcess(ProxyExe1, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &sti, &pro_info);
-					if (!bRet)
-					{
-						MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
-					}
-					TCHAR inBuf[maxLen];
-					CString iniFile;
-					iniFile = dirPath + L"ProxyUI.ini";
-					GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf, maxLen, iniFile);
-					if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
-						WritePrivateProfileString(L"Program", L"app1", ProxyExe1, iniFile);
-					}
-				}
-				break;
-			case IDC_PROXY_STOP1:
-				{
-					// 检查进程是否在
-					if (pro_info.hProcess == 0) {
-						MessageBox(hWnd, TEXT("没有进程"), TEXT("失败"), MB_OK);
-						break;
-					}
-
-					//bat文件采用这种可以关闭, bat的还要写在前面
-					std::wostringstream oss;
-					oss.str(_T(""));
-					oss << _T("/PID ");
-					oss << pro_info.dwProcessId;
-					std::wstring strCmd = oss.str();
-					ShellExecute(NULL, _T("OPEN"), _T("taskkill.exe"), strCmd.c_str(), _T(""), SW_HIDE);
-
-					//不加停顿bat会关不掉
-					Sleep(1000);
-
-					//exe文件采用这种可以关闭
-					DWORD dwExitCode = 0;
-					// 获取子进程的退出码 
-					GetExitCodeProcess(pro_info.hProcess, &dwExitCode);
-					TerminateProcess(pro_info.hProcess, dwExitCode);//终止进程
-
-					// 关闭子进程的主线程句柄 
-					CloseHandle(pro_info.hThread);
-					// 关闭子进程句柄 
-					CloseHandle(pro_info.hProcess);
-					pro_info.hProcess = 0;
-				}
-				break;
-			case IDC_PROXY_FILE2:
-				{
-					selectApplication(hWnd, IDC_PROXY_CMD2);
-				}
-				break;
-			case IDC_PROXY_START2:
-				{
-					// 检查进程是否在
-					if (pro_info2.hProcess > 0) {
-						MessageBox(hWnd, TEXT("先停止再启动"), TEXT("失败"), MB_OK);
-						break;
-					}
-					WCHAR ProxyExe2[MAX_PATH] = { 0 };
-					GetDlgItemText(hWnd, IDC_PROXY_CMD2, (LPTSTR)ProxyExe2, MAX_PATH);
-					if (strcmp((const char*)ProxyExe2, "") == 0) {
-						MessageBox(hWnd, TEXT("先选择程序"), TEXT("失败"), MB_OK);
-						break;
-					}
-
-					ZeroMemory(&pro_info2, sizeof(PROCESS_INFORMATION));
-					ZeroMemory(&sti2, sizeof(STARTUPINFO));
-					sti2.cb = sizeof(sti2);
-					sti2.dwFlags = STARTF_USESHOWWINDOW;
-					sti2.wShowWindow = SW_HIDE;
-					//第二个参数是第一个命令要接收的参数
-					BOOL bRet = FALSE;
-					bRet = CreateProcess(ProxyExe2, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &sti2, &pro_info2);
-					if (!bRet)
-					{
-						MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
-					}
-					TCHAR inBuf[maxLen];
-					CString iniFile;
-					iniFile = dirPath + L"ProxyUI.ini";
-					GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), inBuf, maxLen, iniFile);
-					if (strcmp((const char*)inBuf, "") == 0) {//无文件，创建文件
-						WritePrivateProfileString(L"Program", L"app2", ProxyExe2, iniFile);
-					}
-				}
-				break;
-			case IDC_PROXY_STOP2:
-				{
-					// 检查进程是否在
-					if (pro_info2.hProcess == 0) {
-						MessageBox(hWnd, TEXT("没有进程"), TEXT("失败"), MB_OK);
-						break;
-					}
-
-					//bat文件采用这种可以关闭, bat的还要写在前面
-					std::wostringstream oss;
-					oss.str(_T(""));
-					oss << _T("/PID ");
-					oss << pro_info2.dwProcessId;
-					std::wstring strCmd = oss.str();
-					ShellExecute(NULL, _T("OPEN"), _T("taskkill.exe"), strCmd.c_str(), _T(""), SW_HIDE);
-
-					//不加停顿bat会关不掉
-					Sleep(1000);
-
-					//exe文件采用这种可以关闭
-					DWORD dwExitCode = 0;
-					// 获取子进程的退出码 
-					GetExitCodeProcess(pro_info2.hProcess, &dwExitCode);
-					TerminateProcess(pro_info2.hProcess, dwExitCode);//终止进程
-
-					// 关闭子进程的主线程句柄 
-					CloseHandle(pro_info2.hThread);
-					// 关闭子进程句柄 
-					CloseHandle(pro_info2.hProcess);
-					pro_info2.hProcess = 0;
 				}
 				break;
 			case IDM_START:
