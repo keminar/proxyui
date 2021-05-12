@@ -24,6 +24,7 @@ WCHAR ProxyText[255] = { 0 }; // 代理变量
 WCHAR lanName[255] = { 0 }; // 网络连接
 WCHAR filePath[MAX_PATH];
 CString dirPath;
+CString iniFile;
 
 PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
@@ -121,11 +122,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
-   //得到程序本身路径
-   GetModuleFileName(NULL, filePath, MAX_PATH);
-   dirPath = filePath;
-   dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
-
    HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
       CW_USEDEFAULT, CW_USEDEFAULT, 660, 530, nullptr, nullptr, hInstance, nullptr);
 
@@ -133,6 +129,39 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    {
       return FALSE;
    }
+
+   //得到程序本身路径
+   GetModuleFileName(NULL, filePath, MAX_PATH);
+   dirPath = filePath;
+   dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
+   iniFile = dirPath + IniName;
+
+   // 上次进程ID
+   UINT pid = GetPrivateProfileInt(TEXT("ProxyUI"), TEXT("pid"), 0, iniFile);
+   if (pid > 0) {
+	   TCHAR inBuf[maxLen];
+	   GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, maxLen, iniFile);
+	   if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("one")) == 0) {
+		   HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+		   if (hProc != NULL) {
+			   DWORD dwExitCode;
+			   GetExitCodeProcess(hProc, &dwExitCode);
+			   CloseHandle(hProc);
+			   if (dwExitCode == STILL_ACTIVE)
+			   {
+				   MessageBox(hWnd, TEXT("程序已打开，不能打开多个哦，如需要多开请在操作中切换启动模式"), TEXT("失败"), MB_OK);
+				   return FALSE;
+			   }
+		   }
+	   }
+   }
+
+   DWORD processId = GetCurrentProcessId();//当前进程id
+	// 先把变量写入
+   TCHAR str[0x20];
+   memset(str, 0, 0x20);
+   wsprintf(str, TEXT("%d"), processId);
+   WritePrivateProfileString(TEXT("ProxyUI"), TEXT("pid"), (LPCWSTR)str, iniFile);
 
    ShowWindow(hWnd, nCmdShow);
    UpdateWindow(hWnd);
@@ -152,9 +181,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 
 			//默认值
 			HWND hCmd1;
-			CString iniFile;
 			TCHAR inBuf1[MAX_PATH];
-			iniFile = dirPath + IniName;
 
 			GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 			hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD1);
@@ -199,11 +226,11 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 						break;
 					}
 					// 先把变量写入
-					writeIni(TEXT("Program"), TEXT("app1"), ProxyExe1);
+					WritePrivateProfileString(TEXT("Program"), TEXT("app1"), ProxyExe1, iniFile);
 
 					WCHAR Params[MAX_PATH] = { 0 };
 					GetDlgItemText(hdlg, IDC_EDIT2, (LPTSTR)Params, MAX_PATH);
-					writeIni(TEXT("Program"), TEXT("param1"), Params);
+					WritePrivateProfileString(TEXT("Program"), TEXT("param1"), Params, iniFile);
 
 					lstrcat(ProxyExe1, TEXT(" "));
 					lstrcat(ProxyExe1, Params);
@@ -234,11 +261,11 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 						MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
 						break;
 					}
-					writeIni(TEXT("Program"), TEXT("app2"), ProxyExe2);
+					WritePrivateProfileString(TEXT("Program"), TEXT("app2"), ProxyExe2, iniFile);
 
 					WCHAR Params[MAX_PATH] = { 0 };
 					GetDlgItemText(hdlg, IDC_EDIT4, (LPTSTR)Params, MAX_PATH);
-					writeIni(TEXT("Program"), TEXT("param2"), Params);
+					WritePrivateProfileString(TEXT("Program"), TEXT("param2"), Params, iniFile);
 
 					lstrcat(ProxyExe2, TEXT(" "));
 					lstrcat(ProxyExe2, Params);
@@ -297,8 +324,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
 
 			TCHAR inBuf[maxLen];
-			CString iniFile;
-			iniFile = dirPath + IniName;
 			GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, iniFile);
 			if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)"") == 0) {//无文件，创建文件
 				WritePrivateProfileString(L"Server", L"List", L"http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888", iniFile);
@@ -386,6 +411,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				}
 				else {
 					MessageBox(hWnd, TEXT("当前没有开机启动"), TEXT("失败"), MB_OK);
+				}
+			}
+			break;
+			case IDM_START_MOD:
+			{
+				TCHAR inBuf[maxLen];
+				GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, maxLen, iniFile);
+				if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("one")) == 0) {
+					WritePrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("multi"), iniFile);
+					MessageBox(hWnd, TEXT("已切换到多开模式"), TEXT("成功"), MB_OK);
+				}
+				else {
+					WritePrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), iniFile);
+					MessageBox(hWnd, TEXT("已切换到单开模式"), TEXT("成功"), MB_OK);
 				}
 			}
 			break;
@@ -721,15 +760,6 @@ void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 	}
 }
 
-// 写文件
-void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString)
-{
-	CString iniFile;
-	iniFile = dirPath + IniName;
-	WritePrivateProfileString(lpAppName, lpKeyName, lpString, iniFile);
-}
-
-
 // 发送CLOSE消息
 BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam)
 {
@@ -785,4 +815,5 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 	// 关闭子进程句柄 
 	CloseHandle((*process).hProcess);
 	(*process).hProcess = 0;
+	CloseHandle(hProc);
 }

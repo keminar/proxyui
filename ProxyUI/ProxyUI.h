@@ -34,7 +34,5 @@ void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 void stopApp(HWND hWnd, PROCESS_INFORMATION* process);
 // 发送CLOSE消息
 BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam);
-// 写文件
-void writeIni(LPCWSTR lpAppName, LPCWSTR lpKeyName, LPCWSTR lpString);
 // 更新全局变量
 void updateProxyText();
