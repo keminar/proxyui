@@ -295,7 +295,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				case IDC_PROXY_STOP2:
 				{
 					stopApp(hdlg, &pro_info2);
-					if (pro_info.hProcess == 0) {
+					if (pro_info2.hProcess == 0) {
 						HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"Œ¥‘À––");
 						HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
