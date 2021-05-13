@@ -57,6 +57,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // 初始化全局字符串
     LoadStringW(hInstance, IDS_APP_TITLE, szTitle, MAX_LOADSTRING);
     LoadStringW(hInstance, IDC_PROXYUI, szWindowClass, MAX_LOADSTRING);
+
+	//得到程序本身路径
+	GetModuleFileName(NULL, filePath, MAX_PATH);
+	dirPath = filePath;
+	dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
+	iniFile = dirPath + IniName;
+
     MyRegisterClass(hInstance);
 
     // 执行应用程序初始化: 
@@ -129,12 +136,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    {
       return FALSE;
    }
-
-   //得到程序本身路径
-   GetModuleFileName(NULL, filePath, MAX_PATH);
-   dirPath = filePath;
-   dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
-   iniFile = dirPath + IniName;
 
    // 上次进程ID
    UINT pid = GetPrivateProfileInt(TEXT("ProxyUI"), TEXT("pid"), 0, iniFile);
@@ -306,7 +307,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
-	case WM_CREATE:
+	case WM_CREATE: // 先于InitInstance方法被调用
 		{
 			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"  系统代理",
 				WS_VISIBLE | WS_CHILD | WS_BORDER,
