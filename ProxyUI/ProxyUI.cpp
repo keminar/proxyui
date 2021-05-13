@@ -237,16 +237,25 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					lstrcat(ProxyExe1, Params);
 					// 是否选中后台
 					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
-					startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED);
-					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
-					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+					BOOL ret = startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED);
+					if (ret) {
+						HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+						HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
+						SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
+					}
+
 				}
 				break;
 				case IDC_PROXY_STOP1:
 				{
 					stopApp(hdlg, &pro_info);
-					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
-					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+					if (pro_info.hProcess == 0) {
+						HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+						HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
+						SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"启动");
+					}
 				}
 				break;
 				case IDC_PROXY_FILE2:
@@ -274,16 +283,24 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 
 					// 是否选中后台
 					UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
-					startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED);
-					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
-					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+					BOOL ret = startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED);
+					if (ret) {
+						HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+						HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
+						SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
+					}
 				}
 				break;
 				case IDC_PROXY_STOP2:
 				{
 					stopApp(hdlg, &pro_info2);
-					HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
-					SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+					if (pro_info.hProcess == 0) {
+						HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+						HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
+						SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"启动");
+					}
 				}
 				break;
 			}
@@ -735,12 +752,15 @@ void selectApplication(HWND hWnd, int nIDDlgItem)
 }
 
 // 启动应用
-void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
+BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
 {
-	// 检查进程是否在
+	// 检查进程是否在则先停再开
 	if ((*process).hProcess > 0) {
-		MessageBox(hWnd, TEXT("先停止再启动"), TEXT("失败"), MB_OK);
-		return;
+		stopApp(hWnd, process);
+		Sleep(500);
+		if ((*process).hProcess > 0) {//停止失败
+			return FALSE;
+		}
 	}
 
 	STARTUPINFO sti; //启动信息   
@@ -757,8 +777,9 @@ void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 	if (!bRet)
 	{
 		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
-		return;
+		return FALSE;
 	}
+	return TRUE;
 }
 
 // 发送CLOSE消息

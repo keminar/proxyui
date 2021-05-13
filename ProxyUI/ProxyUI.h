@@ -29,7 +29,7 @@ BOOL GetConnectProxy(HWND hWnd, LPWSTR conn_name);
 // 选择文件
 void selectApplication(HWND hWnd, int nIDDlgItem);
 // 启动应用
-void startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show);
+BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show);
 // 停止应用
 void stopApp(HWND hWnd, PROCESS_INFORMATION* process);
 // 发送CLOSE消息
