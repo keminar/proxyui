@@ -11,7 +11,7 @@ INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 //FORMVIEW 回调消息
 LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam);
 //开机自动运行 
-BOOL SetAutoRun(HWND hwnd);
+BOOL SetAutoRun(HWND hwnd, LPWSTR params);
 //关闭开机自动运行 
 BOOL SetNoAutoRun(HWND hwnd);
 //最小化到托盘 

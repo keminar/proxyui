@@ -22,9 +22,10 @@ WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
 WCHAR ProxyText[255] = { 0 }; // 代理变量
 WCHAR lanName[255] = { 0 }; // 网络连接
-WCHAR filePath[MAX_PATH];
-CString dirPath;
-CString iniFile;
+WCHAR filePath[MAX_PATH];//程序路径
+CString dirPath; //程序所在目录
+CString iniFile; //ini文件路径
+WCHAR startCmdLine[MAX_PATH]; //启动参数
 
 PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
@@ -63,6 +64,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	dirPath = filePath;
 	dirPath = dirPath.Left(dirPath.ReverseFind(TEXT('\\'))) + "\\";
 	iniFile = dirPath + IniName;
+	wcscpy_s(startCmdLine, _countof(startCmdLine), lpCmdLine);
 
     MyRegisterClass(hInstance);
 
@@ -164,9 +166,16 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    wsprintf(str, TEXT("%d"), processId);
    WritePrivateProfileString(TEXT("ProxyUI"), TEXT("pid"), (LPCWSTR)str, iniFile);
 
-   ShowWindow(hWnd, nCmdShow);
+   // 检查开机最小化
+   if (wcscmp((const wchar_t*)startCmdLine, (const wchar_t*)TEXT("-mini")) == 0) {
+	   BuildTrayIcon(hWnd);
+	   ShowWindow(hWnd, SW_HIDE);
+   }
+   else
+   {
+	   ShowWindow(hWnd, nCmdShow);
+   }
    UpdateWindow(hWnd);
-
    return TRUE;
 }
 
@@ -213,6 +222,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 			}
 			// 上次选中的环境
 			GetPrivateProfileString(TEXT("Program"), TEXT("selected"), TEXT(""), inBuf2, maxLen, iniFile);
+			SendMessage(hComboBox, CB_RESETCONTENT, 0, 0);
 			// 分割字符串，并添加Items
 			wchar_t *buffer;
 			wchar_t *token = wcstok_s(inBuf1, L"|", &buffer);
@@ -474,7 +484,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			case IDM_START:
 				{
 					BOOL AutoStart = false;
-					AutoStart = SetAutoRun(hWnd);
+					AutoStart = SetAutoRun(hWnd, TEXT(""));
 					if (AutoStart) {
 						MessageBox(hWnd, TEXT("已设为开机自动运行"), TEXT("成功"), MB_OK);
 					}
@@ -482,7 +492,19 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						MessageBox(hWnd, TEXT("设置开机自运行失败"), TEXT("失败"), MB_OK);
 					}
 				}
-				break;
+			break;
+			case IDM_START_MINI:
+			{
+				BOOL AutoStart = false;
+				AutoStart = SetAutoRun(hWnd, TEXT(" -mini"));
+				if (AutoStart) {
+					MessageBox(hWnd, TEXT("已设为开机自动运行并最小化窗口"), TEXT("成功"), MB_OK);
+				}
+				else {
+					MessageBox(hWnd, TEXT("设置开机自运行失败"), TEXT("失败"), MB_OK);
+				}
+			}
+			break;
 			case IDM_STOP:
 			{
 				BOOL NoAutoStart = false;
@@ -501,11 +523,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, maxLen, iniFile);
 				if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("one")) == 0) {
 					WritePrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("multi"), iniFile);
-					MessageBox(hWnd, TEXT("已切换到多开模式"), TEXT("成功"), MB_OK);
+					MessageBox(hWnd, TEXT("已切换到多开模式，当前程序可以同时打开多次"), TEXT("成功"), MB_OK);
 				}
 				else {
 					WritePrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), iniFile);
-					MessageBox(hWnd, TEXT("已切换到单开模式"), TEXT("成功"), MB_OK);
+					MessageBox(hWnd, TEXT("已切换到单开模式，当前程序只能打开一次"), TEXT("成功"), MB_OK);
 				}
 			}
 			break;
@@ -580,7 +602,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 }
 
 //开机自动运行 
-BOOL SetAutoRun(HWND hwnd)
+BOOL SetAutoRun(HWND hwnd, LPWSTR params)
 {
 	//MessageBox(NULL, filePath, TEXT("path"), MB_OK);
 
@@ -592,8 +614,11 @@ BOOL SetAutoRun(HWND hwnd)
 		bResult = FALSE;
 	}
 	else {
+		WCHAR fileRun[MAX_PATH];
+		wcscpy_s(fileRun, _countof(fileRun), filePath);
+		wcscat_s(fileRun, params);
 		//wcslen 返回的是字符串中的字符数, 在 UNICODE 编码中，一个字符占2个字节
-		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)filePath, (DWORD)wcslen(filePath) * 2) != ERROR_SUCCESS) {
+		if (RegSetValueEx(hRegKey, RegName, 0, REG_SZ, (BYTE*)fileRun, (DWORD)wcslen(fileRun) * 2) != ERROR_SUCCESS) {
 			bResult = FALSE;
 		}
 		else {
