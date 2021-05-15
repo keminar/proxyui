@@ -183,6 +183,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 			//默认值
 			HWND hCmd1;
 			TCHAR inBuf1[MAX_PATH];
+			TCHAR inBuf2[MAX_PATH];
 
 			GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 			hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD1);
@@ -201,7 +202,38 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 			hCmd1 = GetDlgItem(hdlg, IDC_EDIT4);
 			SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
-			// 默认选中
+			// 环境切换
+			HWND hComboBox = GetDlgItem(hdlg, IDC_SWITCH);
+			GetPrivateProfileString(TEXT("Program"), TEXT("switch"), TEXT(""), inBuf1, maxLen, iniFile);
+			if (wcscmp((const wchar_t*)inBuf1, (const wchar_t*)"") == 0) {//无数据，初始化模板
+				WritePrivateProfileString(L"Program", L"switch", L"online|test", iniFile);
+				WritePrivateProfileString(L"Env", L"online", L"-c online.yaml", iniFile);
+				WritePrivateProfileString(L"Env", L"test", L"-c test.yaml", iniFile);
+				GetPrivateProfileString(TEXT("Program"), TEXT("switch"), TEXT(""), inBuf1, maxLen, iniFile);
+			}
+			// 上次选中的环境
+			GetPrivateProfileString(TEXT("Program"), TEXT("selected"), TEXT(""), inBuf2, maxLen, iniFile);
+			// 分割字符串，并添加Items
+			wchar_t *buffer;
+			wchar_t *token = wcstok_s(inBuf1, L"|", &buffer);
+			int i = 0;
+			int j = 0;
+			while (token) {
+				SendMessageW(hComboBox, CB_ADDSTRING, 0, (LPARAM)token);
+				if (wcscmp((const wchar_t*)token, (const wchar_t*)inBuf2) == 0) {
+					j = i;
+				}
+				i++;
+				token = wcstok_s(NULL, L"|", &buffer);
+			}
+			SendMessageW(hComboBox, CB_SETCURSEL, j, (LPARAM)0);
+			// 重画高度
+			RECT rect;
+			GetClientRect(hComboBox, &rect);
+			MapDialogRect(hComboBox, &rect);
+			SetWindowPos(hComboBox, 0, 0, 0, rect.right, (i + 1) * rect.bottom, SWP_NOMOVE);
+
+			// 默认选中后台打开进程
 			CheckDlgButton(hdlg, IDC_CHECK1, BST_CHECKED);
 			CheckDlgButton(hdlg, IDC_CHECK2, BST_CHECKED);
 			EndPaint(hdlg, &ps);
@@ -263,6 +295,28 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					selectApplication(hdlg, IDC_PROXY_CMD2);
 				}
 				break;
+				case IDC_SWITCH:
+				{
+					switch (HIWORD(wParam))
+					{
+					case CBN_SELCHANGE:
+						// 读取选中
+						LRESULT idx_row;
+						WCHAR selectText[255] = { 0 };
+						HWND hComboBox = GetDlgItem(hdlg, IDC_SWITCH);
+						idx_row = SendMessage(hComboBox, CB_GETCURSEL, 0, 0);
+						SendMessage(hComboBox, CB_GETLBTEXT, idx_row, (LPARAM)selectText);
+
+						// 获取配置的参数
+						WCHAR params[MAX_PATH] = { 0 };
+						GetPrivateProfileString(TEXT("Env"), selectText, TEXT(""), params, maxLen, iniFile);
+						// 设置到参数输入框
+						HWND hEdit4 = GetDlgItem(hdlg, IDC_EDIT4);
+						SendMessage(hEdit4, WM_SETTEXT, NULL, (LPARAM)params);
+						break;
+					}
+				}
+				break;
 				case IDC_PROXY_START2:
 				{
 					WCHAR ProxyExe2[MAX_PATH] = { 0 };
@@ -277,6 +331,15 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					GetDlgItemText(hdlg, IDC_EDIT4, (LPTSTR)Params, MAX_PATH);
 					WritePrivateProfileString(TEXT("Program"), TEXT("param2"), Params, iniFile);
 
+					// 环境选择记录下来
+					LRESULT idx_row;
+					WCHAR selectText[255] = { 0 };
+					HWND hComboBox = GetDlgItem(hdlg, IDC_SWITCH);
+					idx_row = SendMessage(hComboBox, CB_GETCURSEL, 0, 0);
+					SendMessage(hComboBox, CB_GETLBTEXT, idx_row, (LPARAM)selectText);
+					WritePrivateProfileString(TEXT("Program"), TEXT("selected"), selectText, iniFile);
+
+					// 拼接命令
 					lstrcat(ProxyExe2, TEXT(" "));
 					lstrcat(ProxyExe2, Params);
 					//MessageBox(hdlg, ProxyExe2, TEXT("失败"), MB_OK);
@@ -728,10 +791,10 @@ void selectApplication(HWND hWnd, int nIDDlgItem)
 {
 	OPENFILENAME opfn;
 	WCHAR strFilename[MAX_PATH];//存放文件名
-								//初始化
+	//初始化
 	ZeroMemory(&opfn, sizeof(OPENFILENAME));
 	opfn.lStructSize = sizeof(OPENFILENAME);//结构体大小
-											//设置过滤
+	//设置过滤
 	opfn.lpstrFilter = L"所有文件\0*.*\0可执行文件\0*.exe\0";
 	//默认过滤器索引设为1
 	opfn.nFilterIndex = 1;
@@ -771,9 +834,9 @@ BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 		sti.dwFlags = STARTF_USESHOWWINDOW;
 		sti.wShowWindow = SW_HIDE;
 	}
-	//第二个参数是第一个命令要接收的参数
+	//dirPath指定新进程的工作路径，解决开机自启动工作路径是C:\Windows\SysWOW64，子进程配置相对路径时找不到配置文件的bug
 	BOOL bRet = FALSE;
-	bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, NULL, &sti, process);
+	bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, dirPath, &sti, process);
 	if (!bRet)
 	{
 		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
