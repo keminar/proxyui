@@ -26,6 +26,7 @@ WCHAR filePath[MAX_PATH];//程序路径
 CString dirPath; //程序所在目录
 CString iniFile; //ini文件路径
 WCHAR startCmdLine[MAX_PATH]; //启动参数
+BOOL autoRunFlag = true; //自动启动一次标志
 
 PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
@@ -280,15 +281,18 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				HDC hdc = BeginPaint(hdlg, &ps);
 				initFormData(hdlg);
 			
-				TCHAR inBuf[maxLen];
-				GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), inBuf, maxLen, iniFile);
-				if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
-					autoStart(hdlg, IDC_PROXY_CMD1, IDC_EDIT2, IDC_STATIC1, IDC_PROXY_START1);
+				if (autoRunFlag == true) {
+					TCHAR inBuf[maxLen];
+					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), inBuf, maxLen, iniFile);
+					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
+						autoStart(hdlg, IDC_PROXY_CMD1, IDC_EDIT2, IDC_STATIC1, IDC_PROXY_START1);
+					}
+					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), inBuf, maxLen, iniFile);
+					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
+						autoStart(hdlg, IDC_PROXY_CMD2, IDC_EDIT4, IDC_STATIC2, IDC_PROXY_START2);
+					}
 				}
-				GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), inBuf, maxLen, iniFile);
-				if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
-					autoStart(hdlg, IDC_PROXY_CMD2, IDC_EDIT4, IDC_STATIC2, IDC_PROXY_START2);
-				}
+				autoRunFlag = false;
 				EndPaint(hdlg, &ps);
 			}
 			break;
