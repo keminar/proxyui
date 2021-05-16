@@ -26,6 +26,7 @@ WCHAR filePath[MAX_PATH];//程序路径
 CString dirPath; //程序所在目录
 CString iniFile; //ini文件路径
 WCHAR startCmdLine[MAX_PATH]; //启动参数
+BOOL initFormFlag = FALSE; //初始化Form标记
 
 PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
@@ -185,7 +186,9 @@ void initFormData(HWND hdlg)
 	HWND hCmd1;
 	TCHAR inBuf1[MAX_PATH];
 	TCHAR inBuf2[MAX_PATH];
-
+	if (initFormFlag) {
+		return;
+	}
 	GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 	hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD1);
 	SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
@@ -240,18 +243,19 @@ void initFormData(HWND hdlg)
 	CheckDlgButton(hdlg, IDC_CHECK2, BST_CHECKED);
 
 	// 程序运行状态
-	if (pro_info.dwProcessId > 0) {
+	if (pro_info.hProcess > 0) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
 		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 	}
-	if (pro_info2.dwProcessId > 0) {
+	if (pro_info2.hProcess > 0) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
 		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 	}
+	initFormFlag = true;
 }
 
 //FORMVIEW 回调消息
