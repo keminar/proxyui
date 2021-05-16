@@ -25,7 +25,10 @@ BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
 BOOL DisableConnectionProxy(HWND hWnd, LPWSTR conn_name);
 // 查询代理
 BOOL GetConnectProxy(HWND hWnd, LPWSTR conn_name);
-
+// 初始化表单值
+void initFormData(HWND hdlg);
+// 自动启动程序
+void autoStart(HWND hdlg, int idCmd, int idParam, int idStatus, int idBtn);
 // 选择文件
 void selectApplication(HWND hWnd, int nIDDlgItem);
 // 启动应用

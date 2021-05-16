@@ -179,9 +179,9 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    return TRUE;
 }
 
+// 初始化表单值
 void initFormData(HWND hdlg)
 {
-	//默认值
 	HWND hCmd1;
 	TCHAR inBuf1[MAX_PATH];
 	TCHAR inBuf2[MAX_PATH];
@@ -241,7 +241,7 @@ void initFormData(HWND hdlg)
 }
 
 // 自动启动程序
-void autoStart(HWND hdlg, WPARAM idCmd, WPARAM idParam, WPARAM idStatus, WPARAM idBtn)
+void autoStart(HWND hdlg, int idCmd, int idParam, int idStatus, int idBtn)
 {
 	WCHAR ProxyExe1[MAX_PATH] = { 0 };
 	GetDlgItemText(hdlg, idCmd, (LPTSTR)ProxyExe1, MAX_PATH);
