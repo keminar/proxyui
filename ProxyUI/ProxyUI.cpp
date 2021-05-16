@@ -26,7 +26,6 @@ WCHAR filePath[MAX_PATH];//程序路径
 CString dirPath; //程序所在目录
 CString iniFile; //ini文件路径
 WCHAR startCmdLine[MAX_PATH]; //启动参数
-BOOL autoRunFlag = true; //自动启动一次标志
 
 PROCESS_INFORMATION pro_info; //进程信息 
 PROCESS_INFORMATION pro_info2; //进程信息  
@@ -143,8 +142,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    // 上次进程ID
    UINT pid = GetPrivateProfileInt(TEXT("ProxyUI"), TEXT("pid"), 0, iniFile);
    if (pid > 0) {
-	   TCHAR inBuf[maxLen];
-	   GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, maxLen, iniFile);
+	   TCHAR inBuf[MAX_PATH];
+	   GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, MAX_PATH, iniFile);
 	   if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("one")) == 0) {
 		   HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
 		   if (hProc != NULL) {
@@ -191,7 +190,7 @@ void initFormData(HWND hdlg)
 	hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD1);
 	SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
-	GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), inBuf1, maxLen, iniFile);
+	GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 	hCmd1 = GetDlgItem(hdlg, IDC_EDIT2);
 	SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
@@ -200,21 +199,21 @@ void initFormData(HWND hdlg)
 	hCmd1 = GetDlgItem(hdlg, IDC_PROXY_CMD2);
 	SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
-	GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), inBuf1, maxLen, iniFile);
+	GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 	hCmd1 = GetDlgItem(hdlg, IDC_EDIT4);
 	SendMessage(hCmd1, WM_SETTEXT, NULL, (LPARAM)inBuf1);
 
 	// 环境切换
 	HWND hComboBox = GetDlgItem(hdlg, IDC_SWITCH);
-	GetPrivateProfileString(TEXT("Program"), TEXT("switch"), TEXT(""), inBuf1, maxLen, iniFile);
+	GetPrivateProfileString(TEXT("Program"), TEXT("switch"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 	if (wcscmp((const wchar_t*)inBuf1, (const wchar_t*)"") == 0) {//无数据，初始化模板
 		WritePrivateProfileString(L"Program", L"switch", L"online|test", iniFile);
 		WritePrivateProfileString(L"Env", L"online", L"-c online.yaml", iniFile);
 		WritePrivateProfileString(L"Env", L"test", L"-c test.yaml", iniFile);
-		GetPrivateProfileString(TEXT("Program"), TEXT("switch"), TEXT(""), inBuf1, maxLen, iniFile);
+		GetPrivateProfileString(TEXT("Program"), TEXT("switch"), TEXT(""), inBuf1, MAX_PATH, iniFile);
 	}
 	// 上次选中的环境
-	GetPrivateProfileString(TEXT("Program"), TEXT("selected"), TEXT(""), inBuf2, maxLen, iniFile);
+	GetPrivateProfileString(TEXT("Program"), TEXT("selected"), TEXT(""), inBuf2, MAX_PATH, iniFile);
 	SendMessage(hComboBox, CB_RESETCONTENT, 0, 0);
 	// 分割字符串，并添加Items
 	wchar_t *buffer;
@@ -239,33 +238,18 @@ void initFormData(HWND hdlg)
 	// 默认选中后台打开进程
 	CheckDlgButton(hdlg, IDC_CHECK1, BST_CHECKED);
 	CheckDlgButton(hdlg, IDC_CHECK2, BST_CHECKED);
-}
 
-// 自动启动程序
-void autoStart(HWND hdlg, int idCmd, int idParam, int idStatus, int idBtn)
-{
-	WCHAR ProxyExe1[MAX_PATH] = { 0 };
-	GetDlgItemText(hdlg, idCmd, (LPTSTR)ProxyExe1, MAX_PATH);
-	if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)"") == 0) {
-		return;
-	}
-
-	WCHAR Params[MAX_PATH] = { 0 };
-	GetDlgItemText(hdlg, idParam, (LPTSTR)Params, MAX_PATH);
-
-	lstrcat(ProxyExe1, TEXT(" "));
-	lstrcat(ProxyExe1, Params);
-	BOOL ret;
-	if (idBtn == IDC_PROXY_START1) {
-		ret = startApp(hdlg, &pro_info, ProxyExe1, false);
-	}
-	else {
-		ret = startApp(hdlg, &pro_info2, ProxyExe1, false);
-	}
-	if (ret) {
-		HWND hStatus = GetDlgItem(hdlg, idStatus);
+	// 程序运行状态
+	if (pro_info.dwProcessId > 0) {
+		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
-		HWND hBtn = GetDlgItem(hdlg, idBtn);
+		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
+		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
+	}
+	if (pro_info2.dwProcessId > 0) {
+		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
+		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
 		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 	}
 }
@@ -280,19 +264,6 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				PAINTSTRUCT ps;
 				HDC hdc = BeginPaint(hdlg, &ps);
 				initFormData(hdlg);
-			
-				if (autoRunFlag == true) {
-					TCHAR inBuf[maxLen];
-					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), inBuf, maxLen, iniFile);
-					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
-						autoStart(hdlg, IDC_PROXY_CMD1, IDC_EDIT2, IDC_STATIC1, IDC_PROXY_START1);
-					}
-					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), inBuf, maxLen, iniFile);
-					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
-						autoStart(hdlg, IDC_PROXY_CMD2, IDC_EDIT4, IDC_STATIC2, IDC_PROXY_START2);
-					}
-				}
-				autoRunFlag = false;
 				EndPaint(hdlg, &ps);
 			}
 			break;
@@ -366,7 +337,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 
 								// 获取配置的参数
 								WCHAR params[MAX_PATH] = { 0 };
-								GetPrivateProfileString(TEXT("Env"), selectText, TEXT(""), params, maxLen, iniFile);
+								GetPrivateProfileString(TEXT("Env"), selectText, TEXT(""), params, MAX_PATH, iniFile);
 								// 设置到参数输入框
 								HWND hEdit4 = GetDlgItem(hdlg, IDC_EDIT4);
 								SendMessage(hEdit4, WM_SETTEXT, NULL, (LPARAM)params);
@@ -498,6 +469,30 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			// 插入FORMVIEW
 			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, (DLGPROC)DlgProc);
 			ShowWindow(hfDlg, SW_SHOW);
+			// 自动开启服务
+			WCHAR ProxyExe1[MAX_PATH] = { 0 };
+			WCHAR Param1[MAX_PATH] = { 0 };
+			TCHAR autoBuf[MAX_PATH] = { 0 };
+			GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), autoBuf, MAX_PATH, iniFile);
+			if (wcscmp((const wchar_t*)autoBuf, (const wchar_t*)TEXT("open")) == 0) {
+				GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
+				if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
+					GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), Param1, MAX_PATH, iniFile);
+					lstrcat(ProxyExe1, TEXT(" "));
+					lstrcat(ProxyExe1, Param1);
+					startApp(hfDlg, &pro_info, ProxyExe1, false);
+				}
+			}
+			GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), autoBuf, MAX_PATH, iniFile);
+			if (wcscmp((const wchar_t*)autoBuf, (const wchar_t*)TEXT("open")) == 0) {
+				GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
+				if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
+					GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), Param1, MAX_PATH, iniFile);
+					lstrcat(ProxyExe1, TEXT(" "));
+					lstrcat(ProxyExe1, Param1);
+					startApp(hfDlg, &pro_info2, ProxyExe1, false);
+				}
+			}
 		}
 		break;
     case WM_COMMAND:
@@ -566,8 +561,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				break;
 			case ID_AUTO1:
 				{
-					TCHAR inBuf[maxLen];
-					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), inBuf, maxLen, iniFile);
+					TCHAR inBuf[MAX_PATH];
+					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), inBuf, MAX_PATH, iniFile);
 					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
 						WritePrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), iniFile);
 						MessageBox(hWnd, TEXT("已关闭自动运行代理程序1"), TEXT("成功"), MB_OK);
@@ -580,8 +575,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				break;
 			case ID_AUTO2:
 				{
-					TCHAR inBuf[maxLen];
-					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), inBuf, maxLen, iniFile);
+					TCHAR inBuf[MAX_PATH];
+					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), inBuf, MAX_PATH, iniFile);
 					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("open")) == 0) {
 						WritePrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), iniFile);
 						MessageBox(hWnd, TEXT("已关闭自动运行代理程序2"), TEXT("成功"), MB_OK);
@@ -594,8 +589,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				break;
 			case IDM_START_MOD:
 				{
-					TCHAR inBuf[maxLen];
-					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, maxLen, iniFile);
+					TCHAR inBuf[MAX_PATH];
+					GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, MAX_PATH, iniFile);
 					if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("one")) == 0) {
 						WritePrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("multi"), iniFile);
 						MessageBox(hWnd, TEXT("已切换到多开模式，当前程序可以同时打开多次"), TEXT("成功"), MB_OK);
