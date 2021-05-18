@@ -18,7 +18,8 @@ BOOL SetNoAutoRun(HWND hwnd);
 void BuildTrayIcon(HWND hwnd);
 //修改托盘图标 
 void ModifyTrayIcon(HWND hwnd);
-
+//销毁系统托盘图标 
+void DestroyTrayIcon(HWND hwnd);
 // 设置代理
 BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr);
 // 取消代理

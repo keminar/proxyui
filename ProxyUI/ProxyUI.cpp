@@ -603,6 +603,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_DESTROY:
+		DestroyTrayIcon(hWnd);
         PostQuitMessage(0);
         break;
 	case WM_CLOSE://关闭窗口时最小化到托盘
@@ -798,6 +799,16 @@ void ModifyTrayIcon(HWND hwnd)
 	firstTray = FALSE;
 }
 
+//销毁系统托盘图标 
+void DestroyTrayIcon(HWND hwnd)
+{
+	NOTIFYICONDATA notifyIconData;
+	ZeroMemory(&notifyIconData, sizeof(notifyIconData));
+	notifyIconData.cbSize = sizeof(notifyIconData);
+	notifyIconData.uID = IDI_PROXYUI;
+	notifyIconData.hWnd = hwnd;
+	Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
+}
 
 // 设置代理 https://docs.microsoft.com/en-us/windows/win32/wininet/setting-and-retrieving-internet-options
 BOOL SetConnectionOptions(HWND hWnd, LPWSTR conn_name, LPWSTR proxy_full_addr)
