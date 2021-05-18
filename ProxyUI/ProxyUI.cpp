@@ -335,7 +335,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 							case CBN_SELCHANGE:
 								// 读取选中
 								LRESULT idx_row;
-								WCHAR selectText[255] = { 0 };
+								WCHAR selectText[MAX_LOADSTRING] = { 0 };
 								HWND hComboBox = GetDlgItem(hdlg, IDC_SWITCH);
 								idx_row = SendMessage(hComboBox, CB_GETCURSEL, 0, 0);
 								SendMessage(hComboBox, CB_GETLBTEXT, idx_row, (LPARAM)selectText);
@@ -653,8 +653,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				if (menu_rtn >= 1 && menu_rtn <= i) {
 					// 设置下拉值
 					SendMessageW(hComboBox, CB_SETCURSEL, menu_rtn - 1, (LPARAM)0);
-					PostMessage(hfDlg, WM_COMMAND, MAKEWPARAM(IDC_SWITCH, CBN_SELCHANGE), NULL);
-					// 启动应用
+					// 防止消息是异步的还没有更新，不用PostMessage模拟消息驱动，直接取值并赋值
+					WCHAR selectText[MAX_LOADSTRING] = { 0 };
+					SendMessage(hComboBox, CB_GETLBTEXT, menu_rtn - 1, (LPARAM)selectText);
+
+					// 获取配置的参数
+					WCHAR params[MAX_PATH] = { 0 };
+					GetPrivateProfileString(TEXT("Env"), selectText, TEXT(""), params, MAX_PATH, iniFile);
+					// 设置到参数输入框
+					HWND hEdit4 = GetDlgItem(hfDlg, IDC_EDIT4);
+					SendMessage(hEdit4, WM_SETTEXT, NULL, (LPARAM)params);
+					
+					// 开启应用
 					clickStartApp2(hfDlg);
 				}
 			}
