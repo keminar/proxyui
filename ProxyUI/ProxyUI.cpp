@@ -263,7 +263,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
 	{
-		case WM_INITDIALOG://这里初始化化，托盘右键才能取到值
+		case WM_SHOWWINDOW://这里初始化化，托盘右键才能取到值
 			{
 				initFormData(hdlg);
 			}
@@ -445,7 +445,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			
 			// 插入FORMVIEW
 			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, (DLGPROC)DlgProc);
-			ShowWindow(hfDlg, SW_SHOW);
 			// 自动开启服务
 			WCHAR ProxyExe1[MAX_PATH] = { 0 };
 			WCHAR Param1[MAX_PATH] = { 0 };
@@ -470,6 +469,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					startApp(hfDlg, &pro_info2, ProxyExe1, false);
 				}
 			}
+			// 显示dialog
+			ShowWindow(hfDlg, SW_SHOW);
 			// 显示托盘
 			BuildTrayIcon(hWnd);
 		}
