@@ -1,5 +1,5 @@
 // ProxyUI.cpp : 定义应用程序的入口点。
-//
+// win32文档 https://docs.microsoft.com/en-us/windows/win32/api/
 
 #include "stdafx.h"
 #include "ProxyUI.h"
@@ -12,7 +12,8 @@
 #include <Commdlg.h>
 #include <TlHelp32.h>
 #include <sstream>
-#include <string.h> 
+#include <string.h>
+#include <strsafe.h>
 
 #define MAX_LOADSTRING 100
 
@@ -491,15 +492,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					}
 				}
 				break;
-			case IDC_PROXY_OK:
+			case IDC_PROXY_OK://设置代理
 				{
 					if (wcscmp((const wchar_t*)ProxyText, (const wchar_t*)CloseProxy) == 0) {
-						DisableConnectionProxy(hWnd, (LPWSTR)lanName);
-						MessageBox(hWnd, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
+						if (DisableConnectionProxy(hWnd, (LPWSTR)lanName)) {
+							MessageBox(hWnd, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
+						}
+						else {
+							ErrorMessage(TEXT("取消代理失败，请尝试右键->以管理员身份运行"));
+						}
 					}
 					else {
-						SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)ProxyText);
-						MessageBox(hWnd, (LPCWSTR)ProxyText, TEXT("代理设置如下"), MB_OK);
+						if (SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)ProxyText)) {
+							MessageBox(hWnd, (LPCWSTR)ProxyText, TEXT("代理设置如下"), MB_OK);
+						}
+						else {
+							ErrorMessage(TEXT("代理设置失败，请尝试右键->以管理员身份运行"));
+						}
 					}
 				}
 				break;
@@ -511,7 +520,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						MessageBox(hWnd, TEXT("已设为开机自动运行"), TEXT("成功"), MB_OK);
 					}
 					else {
-						MessageBox(hWnd, TEXT("设置开机自运行失败"), TEXT("失败"), MB_OK);
+						ErrorMessage(TEXT("设置开机自运行失败，请尝试右键->以管理员身份运行"));
 					}
 				}
 				break;
@@ -523,7 +532,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						MessageBox(hWnd, TEXT("已设为开机自动运行并最小化窗口"), TEXT("成功"), MB_OK);
 					}
 					else {
-						MessageBox(hWnd, TEXT("设置开机自运行失败"), TEXT("失败"), MB_OK);
+						ErrorMessage(TEXT("设置开机自运行失败，请尝试右键->以管理员身份运行"));
 					}
 				}
 				break;
@@ -1095,4 +1104,38 @@ void clickStartApp2(HWND hdlg)
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
 		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 	}
+}
+
+// 显示错误
+void ErrorMessage(LPTSTR lpszFunction)
+{
+	// Retrieve the system error message for the last-error code
+
+	LPVOID lpMsgBuf;
+	LPVOID lpDisplayBuf;
+	DWORD dw = GetLastError();
+
+	FormatMessage(
+		FORMAT_MESSAGE_ALLOCATE_BUFFER |
+		FORMAT_MESSAGE_FROM_SYSTEM |
+		FORMAT_MESSAGE_IGNORE_INSERTS,
+		NULL,
+		dw,
+		MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+		(LPTSTR)&lpMsgBuf,
+		0, NULL);
+
+	// Display the error message and exit the process
+
+	lpDisplayBuf = (LPVOID)LocalAlloc(LMEM_ZEROINIT,
+		(lstrlen((LPCTSTR)lpMsgBuf) + lstrlen((LPCTSTR)lpszFunction) + 40) * sizeof(TCHAR));
+	StringCchPrintf((LPTSTR)lpDisplayBuf,
+		LocalSize(lpDisplayBuf) / sizeof(TCHAR),
+		TEXT("%s \n错误码 %d: %s"),
+		lpszFunction, dw, lpMsgBuf);
+	MessageBox(NULL, (LPCTSTR)lpDisplayBuf, TEXT("错误"), MB_OK);
+
+	LocalFree(lpMsgBuf);
+	LocalFree(lpDisplayBuf);
+	//ExitProcess(dw);
 }

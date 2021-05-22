@@ -40,3 +40,4 @@ BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam);
 void updateProxyText();
 // 模拟启动应用代理2
 void clickStartApp2(HWND hdlg);
+void ErrorMessage(LPTSTR lpszFunction);
