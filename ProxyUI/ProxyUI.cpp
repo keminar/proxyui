@@ -170,7 +170,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    // 检查开机最小化
    if (wcscmp((const wchar_t*)startCmdLine, (const wchar_t*)TEXT("-mini")) == 0) {
-	   BuildTrayIcon(hWnd);
 	   ShowWindow(hWnd, SW_HIDE);
    }
    else
@@ -264,6 +263,11 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
 	{
+		case WM_INITDIALOG://这里初始化化，托盘右键才能取到值
+			{
+				initFormData(hdlg);
+			}
+			break;
 		case WM_PAINT:
 			{
 				PAINTSTRUCT ps;
@@ -436,6 +440,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				// 设置选中
 				SendMessageW(hWndComboBox, CB_SETCURSEL, j, (LPARAM)0);
 			}
+			//更新变量
 			updateProxyText();
 			
 			// 插入FORMVIEW
@@ -465,7 +470,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					startApp(hfDlg, &pro_info2, ProxyExe1, false);
 				}
 			}
-
+			// 显示托盘
 			BuildTrayIcon(hWnd);
 		}
 		break;
