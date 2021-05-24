@@ -930,9 +930,12 @@ BOOL GetConnectProxy(HWND hWnd, LPWSTR conn_name)
 		list.pOptions[0].Value.pszValue = 0;
 
 		ret = InternetQueryOption(NULL, INTERNET_OPTION_PER_CONNECTION_OPTION, &list, &dwBufSize);
-
-		wcscpy_s(ProxyText, _countof(ProxyText), Option[0].Value.pszValue);
-		//MessageBox(hWnd, (LPCWSTR)Option[0].Value.pszValue, TEXT("成功"), MB_OK);
+		// 如不做NULL判断，在windows7上Release模式会出现 "问题事件名称:	BEX 异常代码: c0000417"
+		// Debug模式会出现corecrt_internal_string_templates.h Expression:(((source)))  != NULL
+		if (ret &&  Option[0].Value.pszValue != NULL) {
+			wcscpy_s(ProxyText, _countof(ProxyText), Option[0].Value.pszValue);
+			//MessageBox(hWnd, (LPCWSTR)Option[0].Value.pszValue, TEXT("成功"), MB_OK);
+		}
 	}
 
 	// Free the allocated memory.
