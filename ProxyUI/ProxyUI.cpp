@@ -21,7 +21,7 @@
 HINSTANCE hInst;                                // 当前实例
 WCHAR szTitle[MAX_LOADSTRING];                  // 标题栏文本
 WCHAR szWindowClass[MAX_LOADSTRING];            // 主窗口类名
-WCHAR ProxyText[255] = { 0 }; // 代理变量
+WCHAR proxyText[255] = { 0 }; // 代理变量
 WCHAR lanName[255] = { 0 }; // 网络连接
 WCHAR filePath[MAX_PATH];//程序路径
 CString dirPath; //程序所在目录
@@ -314,7 +314,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
 								SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 							}
-
+							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
 						}
 						break;
 					case IDC_PROXY_STOP1:
@@ -326,6 +326,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
 								SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"启动");
 							}
+							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
 						}
 						break;
 					case IDC_PROXY_FILE2:
@@ -358,6 +359,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					case IDC_PROXY_START2:
 						{
 							clickStartApp2(hdlg);
+							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
 						}
 						break;
 					case IDC_PROXY_STOP2:
@@ -369,6 +371,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
 								SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"启动");
 							}
+							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
 						}
 						break;
 				}
@@ -425,16 +428,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			int j = 0;
 			while (token) {
 				SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)token);
-				if (wcscmp((const wchar_t*)token, (const wchar_t*)ProxyText) == 0) {
+				if (wcscmp((const wchar_t*)token, (const wchar_t*)proxyText) == 0) {
 					j = i;
 				}
 				i++;
 				token = wcstok_s(NULL, L"|", &buffer);
 			}
 
-			if (j == 0 && wcscmp((const wchar_t*)ProxyText, (const wchar_t*)TEXT("")) != 0) { //有设置代理，但不在已经配置的列表
+			if (j == 0 && wcscmp((const wchar_t*)proxyText, (const wchar_t*)TEXT("")) != 0) { //有设置代理，但不在已经配置的列表
 				// 填充下拉菜单并选中
-				SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)ProxyText);
+				SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)proxyText);
 				SendMessageW(hWndComboBox, CB_SETCURSEL, i, (LPARAM)0);
 			}
 			else {
@@ -473,7 +476,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			// 显示dialog
 			ShowWindow(hfDlg, SW_SHOW);
 			// 显示托盘
-			BuildTrayIcon(hWnd);
+			BuildTrayIcon(hWnd, NIM_ADD);
 		}
 		break;
     case WM_COMMAND:
@@ -494,8 +497,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				break;
 			case IDC_PROXY_OK://设置代理
 				{
-					if (wcscmp((const wchar_t*)ProxyText, (const wchar_t*)CloseProxy) == 0) {
+					if (wcscmp((const wchar_t*)proxyText, (const wchar_t*)CloseProxy) == 0) {
 						if (DisableConnectionProxy(hWnd, (LPWSTR)lanName)) {
+							BuildTrayIcon(hWnd, NIM_MODIFY);
 							MessageBox(hWnd, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
 						}
 						else {
@@ -503,8 +507,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						}
 					}
 					else {
-						if (SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)ProxyText)) {
-							MessageBox(hWnd, (LPCWSTR)ProxyText, TEXT("代理设置如下"), MB_OK);
+						if (SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)proxyText)) {
+							BuildTrayIcon(hWnd, NIM_MODIFY);
+							MessageBox(hWnd, (LPCWSTR)proxyText, TEXT("代理设置如下"), MB_OK);
 						}
 						else {
 							ErrorMessage(TEXT("代理设置失败，请尝试右键->以管理员身份运行"));
@@ -588,6 +593,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 						WritePrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), iniFile);
 						MessageBox(hWnd, TEXT("已切换到单开模式，当前程序只能打开一次"), TEXT("成功"), MB_OK);
 					}
+				}
+				break;
+			case ID_OPENDIR:
+				{
+					ShellExecute(hWnd, TEXT("open"), TEXT("explorer.exe"), dirPath, NULL, SW_SHOWNORMAL);
+				}
+				break;
+			case ID_OPENINI:
+				{
+					ShellExecute(hWnd, TEXT("open"), TEXT("notepad.exe"), iniFile, NULL, SW_SHOWNORMAL);
 				}
 				break;
 			case ID_GITHUB:
@@ -767,9 +782,34 @@ BOOL SetNoAutoRun(HWND hwnd)
 	return bResult;
 }
 
+void tipData(WCHAR *str, int len)
+{
+	wcscpy_s(str, len, TEXT("代理管理器:"));
+	wcscat_s(str, len, TEXT("\n当前代理: "));
+	if (wcscmp((const wchar_t*)proxyText, (const wchar_t*)TEXT("")) == 0) {
+		wcscat_s(str, len, TEXT("无"));
+	}
+	else {
+		wcscat_s(str, len, proxyText);
+	}
+	if (pro_info.hProcess > 0)  {
+		wcscat_s(str, len, TEXT("\n程序1: 运行中"));
+	}
+	else {
+		wcscat_s(str, len, TEXT("\n程序1: 未运行"));
+	}
+	if (pro_info2.hProcess > 0) {
+		wcscat_s(str, len, TEXT("\n程序2: 运行中"));
+	}
+	else {
+		wcscat_s(str, len, TEXT("\n程序2: 未运行"));
+	}
+}
+
+
 // 托盘图标
 // https://docs.microsoft.com/en-us/windows/win32/api/shellapi/ns-shellapi-notifyicondataa
-void BuildTrayIcon(HWND hwnd)
+void BuildTrayIcon(HWND hwnd, DWORD act)
 {
 	NOTIFYICONDATA notifyIconData;
 	ZeroMemory(&notifyIconData, sizeof(notifyIconData));
@@ -780,16 +820,20 @@ void BuildTrayIcon(HWND hwnd)
 	notifyIconData.uID = IDI_PROXYUI;
 	notifyIconData.hWnd = hwnd;
 	notifyIconData.uCallbackMessage = WM_CLICKBIT; //自定义消息
-	lstrcpy(notifyIconData.szTip, TEXT("ProxyUI"));
+
+	WCHAR str[255];
+	tipData(str, _countof(str));
+	lstrcpy(notifyIconData.szTip, str);
 	notifyIconData.dwState =  NIS_SHAREDICON;//是否显示icon
 
-	Shell_NotifyIcon(NIM_ADD, &notifyIconData);
+	Shell_NotifyIcon(act, &notifyIconData);
 }
 
 //修改系统托盘图标 
 void ModifyTrayIcon(HWND hwnd)
 {
 	if (!firstTray) {
+		BuildTrayIcon(hwnd, NIM_MODIFY);
 		return;
 	}
 	NOTIFYICONDATA notifyIconData;
@@ -801,14 +845,17 @@ void ModifyTrayIcon(HWND hwnd)
 	notifyIconData.uID = IDI_PROXYUI;
 	notifyIconData.hWnd = hwnd;
 	notifyIconData.uCallbackMessage = WM_CLICKBIT; //自定义消息
-	lstrcpy(notifyIconData.szTip, TEXT("ProxyUI"));
+	
+	WCHAR str[255];
+	tipData(str, _countof(str));
+	lstrcpy(notifyIconData.szTip, str);
 	notifyIconData.dwState = NIS_SHAREDICON;//是否显示icon
 
 	notifyIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP | NIF_INFO;
 	notifyIconData.dwInfoFlags = NIIF_NONE | NIIF_NOSOUND;//不播放声音
 	notifyIconData.uTimeout = 1000/*提示超时毫秒,仅Windows 2000 和 Windows XP有效*/;
-	lstrcpy(notifyIconData.szInfoTitle, TEXT("托盘最小化;-)："));
-	lstrcpy(notifyIconData.szInfo, TEXT("如需退出，请点击\"操作->退出\"。 嘿嘿~~~"));
+	lstrcpy(notifyIconData.szInfoTitle, TEXT("托盘最小化, 右键切换环境"));
+	lstrcpy(notifyIconData.szInfo, TEXT("如需退出，请点击菜单\"操作->退出\"。"));
 
 	Shell_NotifyIcon(NIM_MODIFY, &notifyIconData);
 	firstTray = FALSE;
@@ -933,7 +980,7 @@ BOOL GetConnectProxy(HWND hWnd, LPWSTR conn_name)
 		// 如不做NULL判断，在windows7上Release模式会出现 "问题事件名称:	BEX 异常代码: c0000417"
 		// Debug模式会出现corecrt_internal_string_templates.h Expression:(((source)))  != NULL
 		if (ret &&  Option[0].Value.pszValue != NULL) {
-			wcscpy_s(ProxyText, _countof(ProxyText), Option[0].Value.pszValue);
+			wcscpy_s(proxyText, _countof(proxyText), Option[0].Value.pszValue);
 			//MessageBox(hWnd, (LPCWSTR)Option[0].Value.pszValue, TEXT("成功"), MB_OK);
 		}
 	}
@@ -949,7 +996,7 @@ void updateProxyText()
 {
 	LRESULT idx_row;
 	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
-	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)ProxyText);
+	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)proxyText);
 }
 
 // 选择文件

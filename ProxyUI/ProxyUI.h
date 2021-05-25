@@ -15,7 +15,7 @@ BOOL SetAutoRun(HWND hwnd, LPWSTR params);
 //关闭开机自动运行 
 BOOL SetNoAutoRun(HWND hwnd);
 //托盘图标 
-void BuildTrayIcon(HWND hwnd);
+void BuildTrayIcon(HWND hwnd, DWORD act);
 //修改托盘图标 
 void ModifyTrayIcon(HWND hwnd);
 //销毁系统托盘图标 
