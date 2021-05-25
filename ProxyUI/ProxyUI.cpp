@@ -646,6 +646,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		{
 		case WM_LBUTTONUP://托盘图标还原窗口
 			ShowWindow(hWnd, SW_SHOWNORMAL);
+			::SetForegroundWindow(hWnd);
 			break;
 		case WM_RBUTTONDOWN:
 			POINT pt;
