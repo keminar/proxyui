@@ -397,18 +397,18 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
 	case WM_CREATE: // 先于InitInstance方法被调用
 		{
-			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"  系统代理",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				10, 10, 100, 30,
+			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
+				WS_VISIBLE | WS_CHILD | WS_BORDER | SS_CENTER | SS_CENTERIMAGE,
+				10, 10, 98, 30,
 				hWnd, NULL, NULL, NULL);
 			hWndComboBox = CreateWindowEx(WS_EX_STATICEDGE, L"COMBOBOX", L"下拉框",
 				CBS_DROPDOWN | CBS_HASSTRINGS | WS_VISIBLE | WS_CHILD | WS_BORDER,
 				120, 10, 350, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
 			hWndBtn1 = CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"确定",
 				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				480, 10, 100, 30,
+				480, 10, 70, 30,
 				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
- 
+
 			// 添加默认代理选项
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
 
