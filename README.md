@@ -55,9 +55,9 @@ List=http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.
 app1=anyproxy-windows-amd64-v1.0.exe
 param1=-c charles.yaml
 app2=anyproxy-windows-amd64-v1.0.exe
-param2=-c ot.yaml
+param2=-c test.yaml
 switch=online|test|dev
-selected=ot
+selected=test
 [ProxyUI]
 start=one
 auto1=open
