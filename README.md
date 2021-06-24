@@ -1,5 +1,5 @@
 # proxyui
-proxy manager for windows
+Windows操作系统上的代理管理器，为Anyproxy代理程序在Windows上使用提供可视化界面。
 
 [下载包](http://cloudme.io/)
 
@@ -44,7 +44,32 @@ proxy manager for windows
     
 ```
 
-优点：
+配置示例
+---
+首次程序运行同级目录下会生成一个ProxyUI.ini，可以按需要手动编辑，如支持的代理选项，环境选择选项等，重启软件生效
+
+```
+[Server]
+List=http=127.0.0.1:3000;https=127.0.0.1:3000|http=127.0.0.1:8888;https=127.0.0.1:8888
+[Program]
+app1=anyproxy-windows-amd64-v1.0.exe
+param1=-c charles.yaml
+app2=anyproxy-windows-amd64-v1.0.exe
+param2=-c ot.yaml
+switch=online|test|dev
+selected=ot
+[ProxyUI]
+start=one
+auto1=open
+auto2=open
+[Env]
+online=-c online.yaml
+test=-c test.yaml
+dev=-c dev.yaml
+
+```
+
+功能优点
 ---
   * 对Anyproxy可视化启动停止，易于操作
   * 手机可以常连代理程序1，访问不同环境不需要一直调整手机代理设置
