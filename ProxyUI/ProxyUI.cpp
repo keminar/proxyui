@@ -14,6 +14,7 @@
 #include <sstream>
 #include <string.h>
 #include <strsafe.h>
+#include <psapi.h>
 
 #define MAX_LOADSTRING 100
 
@@ -142,27 +143,42 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
       return FALSE;
    }
 
+   //当前进程id
+   DWORD processId = GetCurrentProcessId();
+
    // 上次进程ID
    UINT pid = GetPrivateProfileInt(TEXT("ProxyUI"), TEXT("pid"), 0, iniFile);
    if (pid > 0) {
 	   TCHAR inBuf[MAX_LOADSTRING];
 	   GetPrivateProfileString(TEXT("ProxyUI"), TEXT("start"), TEXT("one"), inBuf, MAX_LOADSTRING, iniFile);
 	   if (wcscmp((const wchar_t*)inBuf, (const wchar_t*)TEXT("one")) == 0) {
-		   HANDLE hProc = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-		   if (hProc != NULL) {
-			   DWORD dwExitCode;
-			   GetExitCodeProcess(hProc, &dwExitCode);
-			   CloseHandle(hProc);
-			   if (dwExitCode == STILL_ACTIVE)
-			   {
-				   MessageBox(hWnd, TEXT("程序已打开，不能打开多个哦，如需要多开请在操作中切换启动模式"), TEXT("失败"), MB_OK);
-				   return FALSE;
+		   HANDLE lastProc = OpenProcess(PROCESS_QUERY_INFORMATION |
+			   PROCESS_VM_READ, FALSE, pid);
+		   if (lastProc != NULL) {
+			   TCHAR LastPath[MAX_PATH];
+			   if (GetModuleFileNameEx(lastProc, 0, LastPath, MAX_PATH)) {
+				   DWORD dwExitCode;
+				   GetExitCodeProcess(lastProc, &dwExitCode);
+				   if (dwExitCode == STILL_ACTIVE) {
+					   HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION |
+						   PROCESS_VM_READ, FALSE, processId);
+					   if (hProc != NULL) {
+						   // 对比文件路径一样才提示多开，避免系统刚开机时文本里的pid被其它进程占用
+						   TCHAR CurPath[MAX_PATH];
+						   if (GetModuleFileNameEx(hProc, 0, CurPath, MAX_PATH)) {
+							   if (wcscmp((const wchar_t*)LastPath, (const wchar_t*)CurPath) == 0) {
+								   MessageBox(hWnd, TEXT("程序已打开，不能打开多个哦，如需要多开请在操作中切换启动模式"), TEXT("失败"), MB_OK);
+								   return FALSE;
+							   }
+						   }
+						   CloseHandle(hProc);
+					   }
+				   }
 			   }
+			   CloseHandle(lastProc);
 		   }
 	   }
    }
-
-   DWORD processId = GetCurrentProcessId();//当前进程id
 	// 先把变量写入
    TCHAR str[0x20];
    memset(str, 0, 0x20);
