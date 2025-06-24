@@ -260,13 +260,13 @@ void initFormData(HWND hdlg)
 	CheckDlgButton(hdlg, IDC_CHECK2, BST_CHECKED);
 
 	// 程序运行状态
-	if (pro_info.hProcess > 0) {
+	if (pro_info.dwProcessId > 0) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
 		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 	}
-	if (pro_info2.hProcess > 0) {
+	if (pro_info2.dwProcessId > 0) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
@@ -336,7 +336,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					case IDC_PROXY_STOP1:
 						{
 							stopApp(hdlg, &pro_info);
-							if (pro_info.hProcess == 0) {
+							if (pro_info.dwProcessId == 0) {
 								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
 								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
@@ -381,7 +381,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					case IDC_PROXY_STOP2:
 						{
 							stopApp(hdlg, &pro_info2);
-							if (pro_info2.hProcess == 0) {
+							if (pro_info2.dwProcessId == 0) {
 								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
 								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
@@ -396,7 +396,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 	}
 	return 0;
 }
-
+#include <windows.h>
 //
 //  函数: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -413,7 +413,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
 	case WM_CREATE: // 先于InitInstance方法被调用
 		{
-			CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
+			HWND hWndSys = CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
 				WS_VISIBLE | WS_CHILD | WS_BORDER | SS_CENTER | SS_CENTERIMAGE,
 				10, 10, 98, 30,
 				hWnd, NULL, NULL, NULL);
@@ -424,7 +424,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				WS_VISIBLE | WS_CHILD | WS_BORDER,
 				480, 10, 70, 30,
 				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
-
+			
 			// 添加默认代理选项
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
 
@@ -465,6 +465,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			
 			// 插入FORMVIEW
 			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, (DLGPROC)DlgProc);
+			
+			// 同步字体
+			HWND hBtn = GetDlgItem(hfDlg, IDC_PROXY_START1);
+			HFONT hChildFont = (HFONT)SendMessage(hBtn, WM_GETFONT, 0, 0);
+			SendMessageW(hWndSys, WM_SETFONT, (WPARAM)(hChildFont), 0);
+			SendMessageW(hWndBtn1, WM_SETFONT, (WPARAM)(hChildFont), 0);
+
 			// 自动开启服务
 			WCHAR ProxyExe1[MAX_PATH] = { 0 };
 			WCHAR Param1[MAX_PATH] = { 0 };
@@ -629,7 +636,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
                 break;
             case IDM_EXIT:
 				// 检查进程是否在
-				if (pro_info.hProcess > 0 || pro_info2.hProcess > 0) {
+				if (pro_info.dwProcessId > 0 || pro_info2.dwProcessId > 0) {
 					MessageBox(hWnd, TEXT("先停止启动的程序再退出"), TEXT("失败"), MB_OK);
 					break;
 				}
@@ -809,13 +816,13 @@ void tipData(WCHAR *str, int len)
 	else {
 		wcscat_s(str, len, proxyText);
 	}
-	if (pro_info.hProcess > 0)  {
+	if (pro_info.dwProcessId > 0)  {
 		wcscat_s(str, len, TEXT("\n程序1: 运行中"));
 	}
 	else {
 		wcscat_s(str, len, TEXT("\n程序1: 未运行"));
 	}
-	if (pro_info2.hProcess > 0) {
+	if (pro_info2.dwProcessId > 0) {
 		wcscat_s(str, len, TEXT("\n程序2: 运行中"));
 	}
 	else {
@@ -1048,10 +1055,10 @@ void selectApplication(HWND hWnd, int nIDDlgItem)
 BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
 {
 	// 检查进程是否在则先停再开
-	if ((*process).hProcess > 0) {
+	if ((*process).dwProcessId > 0) {
 		stopApp(hWnd, process);
 		Sleep(500);
-		if ((*process).hProcess > 0) {//停止失败
+		if ((*process).dwProcessId > 0) {//停止失败
 			return FALSE;
 		}
 	}
@@ -1072,6 +1079,12 @@ BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
 		return FALSE;
 	}
+
+	// 关闭子进程的主线程句柄 
+	CloseHandle((*process).hThread);
+	// 关闭子进程句柄 
+	CloseHandle((*process).hProcess);
+
 	return TRUE;
 }
 
@@ -1090,7 +1103,7 @@ BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam)
 void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 {
 	// 检查进程是否在
-	if ((*process).hProcess == 0) {
+	if ((*process).dwProcessId == 0) {
 		//MessageBox(hWnd, TEXT("没有进程"), TEXT("失败"), MB_OK);
 		return;
 	}
@@ -1121,15 +1134,11 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 		//exe文件采用这种可以关闭
 		DWORD dwExitCode = 0;
 		// 获取子进程的退出码 
-		GetExitCodeProcess((*process).hProcess, &dwExitCode);
-		TerminateProcess((*process).hProcess, dwExitCode);//终止进程
+		GetExitCodeProcess(hProc, &dwExitCode);
+		TerminateProcess(hProc, dwExitCode);//终止进程
 	}
 
-	// 关闭子进程的主线程句柄 
-	CloseHandle((*process).hThread);
-	// 关闭子进程句柄 
-	CloseHandle((*process).hProcess);
-	(*process).hProcess = 0;
+	(*process).dwProcessId = 0;
 	CloseHandle(hProc);
 }
 
