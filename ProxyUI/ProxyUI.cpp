@@ -279,7 +279,14 @@ void initFormData(HWND hdlg)
 LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
-	{
+    {
+    case WM_GETMINMAXINFO:
+        {
+            LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+            lpMMI->ptMaxTrackSize.x = 800;
+            lpMMI->ptMaxTrackSize.y = 600;
+        }
+        break;
 		case WM_SHOWWINDOW://这里初始化化，托盘右键才能取到值
 			{
 				initFormData(hdlg);
@@ -411,6 +418,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
     {
+    case WM_GETMINMAXINFO:
+        {
+            LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+            lpMMI->ptMaxTrackSize.x = 800;
+            lpMMI->ptMaxTrackSize.y = 600;
+        }
+        break;
 	case WM_CREATE: // 先于InitInstance方法被调用
 		{
 			HWND hWndSys = CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
@@ -741,6 +755,13 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     UNREFERENCED_PARAMETER(lParam);
     switch (message)
     {
+    case WM_GETMINMAXINFO:
+        {
+            LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+            lpMMI->ptMaxTrackSize.x = 800;
+            lpMMI->ptMaxTrackSize.y = 600;
+        }
+        break;
     case WM_INITDIALOG:
         return (INT_PTR)TRUE;
 
