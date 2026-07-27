@@ -326,11 +326,13 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 							GetDlgItemText(hdlg, IDC_EDIT2, (LPTSTR)Params, MAX_PATH);
 							WritePrivateProfileString(TEXT("Program"), TEXT("param1"), Params, iniFile);
 
-							lstrcat(ProxyExe1, TEXT(" "));
-							lstrcat(ProxyExe1, Params);
-							// 是否选中后台
-							UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
-							BOOL ret = startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED);
+						lstrcat(ProxyExe1, TEXT(" "));
+						lstrcat(ProxyExe1, Params);
+						// 是否选中后台
+						UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
+						// 是否申请 UAC 管理员权限
+						UINT uac = IsDlgButtonChecked(hdlg, IDC_UAC);
+						BOOL ret = startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED, uac == BST_CHECKED);
 							if (ret) {
 								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
@@ -491,23 +493,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			WCHAR Param1[MAX_PATH] = { 0 };
 			TCHAR autoBuf[MAX_LOADSTRING] = { 0 };
 			GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), autoBuf, MAX_LOADSTRING, iniFile);
+			UINT uac = IsDlgButtonChecked(hWnd, IDC_UAC);
 			if (wcscmp((const wchar_t*)autoBuf, (const wchar_t*)TEXT("open")) == 0) {
 				GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
 				if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
 					GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), Param1, MAX_PATH, iniFile);
 					lstrcat(ProxyExe1, TEXT(" "));
 					lstrcat(ProxyExe1, Param1);
-					startApp(hfDlg, &pro_info, ProxyExe1, false);
-				}
+				startApp(hfDlg, &pro_info, ProxyExe1, false, uac == BST_CHECKED);
 			}
-			GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), autoBuf, MAX_LOADSTRING, iniFile);
-			if (wcscmp((const wchar_t*)autoBuf, (const wchar_t*)TEXT("open")) == 0) {
-				GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
-				if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
-					GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), Param1, MAX_PATH, iniFile);
-					lstrcat(ProxyExe1, TEXT(" "));
-					lstrcat(ProxyExe1, Param1);
-					startApp(hfDlg, &pro_info2, ProxyExe1, false);
+		}
+		GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), autoBuf, MAX_LOADSTRING, iniFile);
+		if (wcscmp((const wchar_t*)autoBuf, (const wchar_t*)TEXT("open")) == 0) {
+			GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
+			if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
+				GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), Param1, MAX_PATH, iniFile);
+				lstrcat(ProxyExe1, TEXT(" "));
+				lstrcat(ProxyExe1, Param1);
+				startApp(hfDlg, &pro_info2, ProxyExe1, false, false);
 				}
 			}
 			// 显示dialog
@@ -1072,8 +1075,8 @@ void selectApplication(HWND hWnd, int nIDDlgItem)
 	}
 }
 
-// 启动应用
-BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show)
+// 启动应用（支持 UAC 提权）
+BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show, BOOL uac)
 {
 	// 检查进程是否在则先停再开
 	if ((*process).dwProcessId > 0) {
@@ -1084,27 +1087,83 @@ BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 		}
 	}
 
-	STARTUPINFO sti; //启动信息   
 	ZeroMemory(process, sizeof(PROCESS_INFORMATION));
-	ZeroMemory(&sti, sizeof(STARTUPINFO));
-	sti.cb = sizeof(sti);
-	if (!show) {
-		sti.dwFlags = STARTF_USESHOWWINDOW;
-		sti.wShowWindow = SW_HIDE;
-	}
-	//dirPath指定新进程的工作路径，解决开机自启动工作路径是C:\Windows\SysWOW64，子进程配置相对路径时找不到配置文件的bug
-	BOOL bRet = FALSE;
-	bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, dirPath, &sti, process);
-	if (!bRet)
-	{
-		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
-		return FALSE;
+
+	// 分离程序路径和参数
+	WCHAR exePath[MAX_PATH] = { 0 };
+	WCHAR cmdArgs[MAX_PATH * 2] = { 0 };
+	wcscpy_s(exePath, MAX_PATH, ProxyExe1);
+
+	// 查找第一个空格，分离出程序路径和参数
+	WCHAR* spacePos = wcschr(ProxyExe1, L' ');
+	if (spacePos != NULL) {
+		// 截取程序路径
+		size_t pathLen = spacePos - ProxyExe1;
+		wcsncpy_s(exePath, MAX_PATH, ProxyExe1, pathLen);
+		// 截取参数（跳过空格）
+		wcscpy_s(cmdArgs, MAX_PATH * 2, spacePos + 1);
 	}
 
-	// 关闭子进程的主线程句柄 
-	CloseHandle((*process).hThread);
-	// 关闭子进程句柄 
-	CloseHandle((*process).hProcess);
+	BOOL bRet = FALSE;
+
+	if (uac) {
+		// 使用 ShellExecuteEx 以管理员权限启动（会弹出 UAC 授权窗口）
+		SHELLEXECUTEINFO sei;
+		ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
+		sei.cbSize = sizeof(SHELLEXECUTEINFO);
+		sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+		sei.hwnd = hWnd;
+		sei.lpVerb = L"runas";           // 以管理员身份运行，弹出 UAC 授权窗口
+		sei.lpFile = exePath;            // 程序路径
+		sei.lpParameters = cmdArgs;      // 启动参数
+		sei.lpDirectory = dirPath;       // 工作目录
+		sei.nShow = show ? SW_SHOW : SW_HIDE;
+		sei.hInstApp = NULL;
+
+		bRet = ShellExecuteEx(&sei);
+		if (!bRet)
+		{
+			DWORD err = GetLastError();
+			if (err == ERROR_CANCELLED) {
+				// 用户取消了 UAC 授权
+				MessageBox(hWnd, TEXT("用户取消了授权，程序未启动"), TEXT("提示"), MB_OK);
+			} else {
+				MessageBox(hWnd, TEXT("启动失败，可能需要管理员权限"), TEXT("失败"), MB_OK);
+			}
+			return FALSE;
+		}
+
+		// 从 ShellExecuteEx 获取进程信息
+		if (sei.hProcess != NULL) {
+			process->dwProcessId = GetProcessId(sei.hProcess);
+			process->hProcess = sei.hProcess;
+			process->hThread = NULL; // ShellExecuteEx 不返回线程句柄
+		}
+
+		// 关闭进程句柄（进程会继续运行）
+		if (process->hProcess != NULL) {
+			CloseHandle(process->hProcess);
+			process->hProcess = NULL;
+		}
+	} else {
+		// 不使用 UAC，直接以当前权限启动（继承 ProxyUI 权限）
+		STARTUPINFO sti;
+		ZeroMemory(&sti, sizeof(STARTUPINFO));
+		sti.cb = sizeof(sti);
+		if (!show) {
+			sti.dwFlags = STARTF_USESHOWWINDOW;
+			sti.wShowWindow = SW_HIDE;
+		}
+		//dirPath指定新进程的工作路径，解决开机自启动工作路径是C:\Windows\SysWOW64，子进程配置相对路径时找不到配置文件的bug
+		bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, dirPath, &sti, process);
+		if (!bRet) {
+			MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
+			return FALSE;
+		}
+		// 关闭子进程句柄
+		CloseHandle((*process).hThread);
+		CloseHandle((*process).hProcess);
+	}
 
 	return TRUE;
 }
@@ -1131,6 +1190,25 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 
 	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
 	if (hProc == NULL) {
+		// 可能因为权限不足无法打开管理员进程，尝试使用 taskkill 提权终止
+		WCHAR pidStr[32] = { 0 };
+		wsprintf(pidStr, L"/PID %lu /F", (*process).dwProcessId);
+		SHELLEXECUTEINFO sei;
+		ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
+		sei.cbSize = sizeof(SHELLEXECUTEINFO);
+		sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+		sei.hwnd = NULL;
+		sei.lpVerb = L"runas";
+		sei.lpFile = L"taskkill.exe";
+		sei.lpParameters = pidStr;
+		sei.nShow = SW_HIDE;
+		if (ShellExecuteEx(&sei)) {
+			if (sei.hProcess != NULL) {
+				WaitForSingleObject(sei.hProcess, 5000);
+				CloseHandle(sei.hProcess);
+			}
+		}
+		(*process).dwProcessId = 0;
 		return;
 	}
 
@@ -1194,7 +1272,9 @@ void clickStartApp2(HWND hdlg)
 
 	// 是否选中后台
 	UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
-	BOOL ret = startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED);
+	// 是否申请 UAC 管理员权限
+	UINT uac = IsDlgButtonChecked(hdlg, IDC_UAC);
+	BOOL ret = startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED, uac == BST_CHECKED);
 	if (ret) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
