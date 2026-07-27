@@ -1117,10 +1117,9 @@ BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 
 	BOOL bRet = FALSE;
 
-	if (uac) {
-		// 使用计划任务提权：首次UAC授权，后续静默启动
-		int appId = (process == &pro_info) ? 1 : 2;
-		return startAppElevated(hWnd, process, ProxyExe1, show, appId);
+	if (uac && process == &pro_info) {
+		// 仅app1使用计划任务提权：首次UAC授权，后续静默启动
+		return startAppElevated(hWnd, process, ProxyExe1, show, 1);
 	} else {
 		// 不使用 UAC，直接以当前权限启动（继承 ProxyUI 权限）
 		STARTUPINFO sti;
