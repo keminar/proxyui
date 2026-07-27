@@ -1272,9 +1272,7 @@ void clickStartApp2(HWND hdlg)
 
 	// 是否选中后台
 	UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
-	// 是否申请 UAC 管理员权限
-	UINT uac = IsDlgButtonChecked(hdlg, IDC_UAC);
-	BOOL ret = startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED, uac == BST_CHECKED);
+	BOOL ret = startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED, false);
 	if (ret) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
