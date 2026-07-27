@@ -350,10 +350,11 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
 						}
 						break;
-					case IDC_PROXY_STOP1:
-						{
-							stopApp(hdlg, &pro_info);
-							if (pro_info.dwProcessId == 0) {
+				case IDC_PROXY_STOP1:
+					{
+						stopApp(hdlg, &pro_info);
+						stopAppElevated(&pro_info, 1);  // 清理计划任务
+						if (pro_info.dwProcessId == 0) {
 								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
 								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
@@ -1385,21 +1386,40 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 		int cdl = (int)wcslen(cleanDir);
 		while (cdl > 0 && cleanDir[cdl - 1] == L'\\') cleanDir[--cdl] = 0;
 
-		// 用 start /D 设置工作目录替代 cd /d，避免嵌套引号问题
-		// 后台启动时加 /MIN 最小化窗口
-		WCHAR schtasksCmd[2048];
-		if (show) {
-			swprintf_s(schtasksCmd, L"/create /tn \"%s\" /tr \"cmd /c start \\\"\\\" /D \\\"%s\\\" \\\"%s\\\" %s\" /sc once /st 00:00 /sd 2000/01/01 /rl highest /f",
-				taskName, cleanDir, exePath, cmdArgs);
-		} else {
-			swprintf_s(schtasksCmd, L"/create /tn \"%s\" /tr \"cmd /c start /MIN \\\"\\\" /D \\\"%s\\\" \\\"%s\\\" %s\" /sc once /st 00:00 /sd 2000/01/01 /rl highest /f",
-				taskName, cleanDir, exePath, cmdArgs);
+		// 用 VBS 脚本启动，通过 wscript.exe 执行（wscript 是 GUI 程序，无控制台窗口）
+		WCHAR vbsPath[MAX_PATH];
+		swprintf_s(vbsPath, MAX_PATH, L"%s\\_pl%d.vbs", cleanDir, appId);
+
+		// VBS 引号转义：VBS 中两个双引号 "" 表示一个字面双引号
+		WCHAR vbDir[MAX_PATH * 2] = { 0 }, vbExe[MAX_PATH * 2] = { 0 }, vbArgs[MAX_PATH * 4] = { 0 };
+		WCHAR *d;
+		for (const WCHAR *s = cleanDir; *s; s++) { d = vbDir + wcslen(vbDir); *d++ = *s; if (*s == L'"') *d++ = L'"'; *d = 0; }
+		for (const WCHAR *s = exePath; *s; s++)  { d = vbExe + wcslen(vbExe); *d++ = *s; if (*s == L'"') *d++ = L'"'; *d = 0; }
+		for (const WCHAR *s = cmdArgs; *s; s++)  { d = vbArgs + wcslen(vbArgs); *d++ = *s; if (*s == L'"') *d++ = L'"'; *d = 0; }
+
+		int winStyle = show ? 1 : 0;  // 1=正常, 0=隐藏
+
+		WCHAR vbs[4096];
+		int vbsLen = swprintf_s(vbs, L"Set W=CreateObject(\"WScript.Shell\")\r\nW.CurrentDirectory=\"%s\"\r\nW.Run \"\"\"%s\"\" %s\",%d,0\r\n",
+			vbDir, vbExe, vbArgs, winStyle);
+
+		HANDLE hVbs = CreateFileW(vbsPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+		if (hVbs != INVALID_HANDLE_VALUE) {
+			DWORD wr;
+			WORD bom = 0xFEFF;
+			WriteFile(hVbs, &bom, 2, &wr, NULL);
+			WriteFile(hVbs, vbs, (DWORD)(vbsLen * sizeof(WCHAR)), &wr, NULL);
+			CloseHandle(hVbs);
 		}
+
+		WCHAR schtasksCmd[2048];
+		swprintf_s(schtasksCmd, L"/create /tn \"%s\" /tr \"wscript.exe //B //Nologo \\\"%s\\\"\" /sc once /st 00:00 /sd 2000/01/01 /rl highest /f",
+			taskName, vbsPath);
 
 		SHELLEXECUTEINFO sei;
 		ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
 		sei.cbSize = sizeof(SHELLEXECUTEINFO);
-		sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+		sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE;
 		sei.hwnd = hWnd;
 		sei.lpVerb = L"runas";
 		sei.lpFile = L"schtasks.exe";
@@ -1435,29 +1455,38 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 		}
 	}
 
-	// 运行任务（不需要UAC，schtasks /run 触发任务计划服务执行）
-	WCHAR runCmd[256];
-	swprintf_s(runCmd, L"/run /tn \"%s\"", taskName);
-	SHELLEXECUTEINFO seiRun;
-	ZeroMemory(&seiRun, sizeof(SHELLEXECUTEINFO));
-	seiRun.cbSize = sizeof(SHELLEXECUTEINFO);
-	seiRun.fMask = SEE_MASK_NOCLOSEPROCESS;
-	seiRun.lpFile = L"schtasks.exe";
-	seiRun.lpParameters = runCmd;
-	seiRun.nShow = SW_HIDE;
-	if (!ShellExecuteEx(&seiRun)) {
-		MessageBox(hWnd, TEXT("执行计划任务失败"), TEXT("失败"), MB_OK);
-		return FALSE;
-	}
-	if (seiRun.hProcess != NULL) {
-		WaitForSingleObject(seiRun.hProcess, 10000);
-		DWORD exitCode = 1;
-		GetExitCodeProcess(seiRun.hProcess, &exitCode);
-		CloseHandle(seiRun.hProcess);
-		if (exitCode != 0) {
-			WCHAR msg[512];
-			swprintf_s(msg, L"运行计划任务失败 (schtasks exit=%d)\n任务: %s", exitCode, taskName);
-			MessageBox(hWnd, msg, TEXT("失败"), MB_OK);
+	// 用 COM API 运行任务，不经过 schtasks.exe，无控制台窗口
+	{
+		HRESULT hr = E_FAIL;
+		HRESULT hrInit = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+		if (SUCCEEDED(hrInit)) {
+			ITaskService* pService = NULL;
+			hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
+				IID_ITaskService, (void**)&pService);
+			if (SUCCEEDED(hr)) {
+				hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+				if (SUCCEEDED(hr)) {
+					ITaskFolder* pRootFolder = NULL;
+					hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
+					if (SUCCEEDED(hr)) {
+						IRegisteredTask* pRegTask = NULL;
+						hr = pRootFolder->GetTask(_bstr_t(taskName), &pRegTask);
+						if (SUCCEEDED(hr) && pRegTask != NULL) {
+							IRunningTask* pRunning = NULL;
+							hr = pRegTask->Run(_variant_t(), &pRunning);
+							if (pRunning) pRunning->Release();
+						}
+						if (pRegTask) pRegTask->Release();
+						pRootFolder->Release();
+					}
+				}
+				pService->Release();
+			}
+			CoUninitialize();
+		}
+
+		if (FAILED(hr)) {
+			MessageBox(hWnd, TEXT("执行计划任务失败"), TEXT("失败"), MB_OK);
 			return FALSE;
 		}
 	}
@@ -1503,11 +1532,9 @@ foundPid:
 // 停止通过计划任务启动的应用
 void stopAppElevated(PROCESS_INFORMATION* process, int appId)
 {
-	if ((*process).dwProcessId == 0) {
-		return;
-	}
+	// 不再因 PID==0 提前返回，这样停止按钮关闭进程后仍可清理计划任务
 
-	// 先尝试终止进程
+	// 先尝试终止进程（PID>0 时有效）
 	if ((*process).dwProcessId > 1) {
 		HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
 		if (hProc != NULL) {
@@ -1568,23 +1595,50 @@ void stopAppElevated(PROCESS_INFORMATION* process, int appId)
 		}
 	}
 
-	// 删除计划任务，确保下次启动用最新配置重建
-	WCHAR taskName[64];
-	getElevatedTaskName(taskName, 64, appId);
-	WCHAR delCmd[256];
-	swprintf_s(delCmd, L"/delete /tn \"%s\" /f", taskName);
-	SHELLEXECUTEINFO seiDel;
-	ZeroMemory(&seiDel, sizeof(SHELLEXECUTEINFO));
-	seiDel.cbSize = sizeof(SHELLEXECUTEINFO);
-	seiDel.fMask = SEE_MASK_NOCLOSEPROCESS;
-	seiDel.lpVerb = L"runas";
-	seiDel.lpFile = L"schtasks.exe";
-	seiDel.lpParameters = delCmd;
-	seiDel.nShow = SW_HIDE;
-	ShellExecuteEx(&seiDel);
-	if (seiDel.hProcess != NULL) {
-		WaitForSingleObject(seiDel.hProcess, 10000);
-		CloseHandle(seiDel.hProcess);
+	// 删除计划任务：先尝试 COM（进程已提权时生效），失败则走 UAC 弹窗
+	{
+		WCHAR taskNameDel[64];
+		getElevatedTaskName(taskNameDel, 64, appId);
+		BOOL deleted = FALSE;
+
+		// 方案1: COM API（无需额外UAC，仅当进程已提权时有效）
+		HRESULT hrDel = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+		if (SUCCEEDED(hrDel)) {
+			ITaskService* pServiceDel = NULL;
+			hrDel = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
+				IID_ITaskService, (void**)&pServiceDel);
+			if (SUCCEEDED(hrDel)) {
+				hrDel = pServiceDel->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
+				if (SUCCEEDED(hrDel)) {
+					ITaskFolder* pRootFolderDel = NULL;
+					hrDel = pServiceDel->GetFolder(_bstr_t(L"\\"), &pRootFolderDel);
+					if (SUCCEEDED(hrDel)) {
+						hrDel = pRootFolderDel->DeleteTask(_bstr_t(taskNameDel), 0);
+						pRootFolderDel->Release();
+						if (SUCCEEDED(hrDel)) deleted = TRUE;
+					}
+				}
+				pServiceDel->Release();
+			}
+			CoUninitialize();
+		}
+
+		// 方案2: COM 失败（进程未提权），走 UAC 弹窗授权
+		if (!deleted) {
+			WCHAR delCmd[512];
+			swprintf_s(delCmd, L"/c schtasks /delete /tn \"%s\" /f", taskNameDel);
+			SHELLEXECUTEINFO seiDel = { sizeof(seiDel) };
+			seiDel.fMask = SEE_MASK_NOCLOSEPROCESS;
+			seiDel.hwnd = hfDlg;
+			seiDel.lpVerb = L"runas";
+			seiDel.lpFile = L"cmd.exe";
+			seiDel.lpParameters = delCmd;
+			seiDel.nShow = SW_HIDE;
+			if (ShellExecuteEx(&seiDel) && seiDel.hProcess != NULL) {
+				WaitForSingleObject(seiDel.hProcess, 10000);
+				CloseHandle(seiDel.hProcess);
+			}
+		}
 	}
 
 	(*process).dwProcessId = 0;
