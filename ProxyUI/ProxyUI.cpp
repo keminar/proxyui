@@ -1260,6 +1260,49 @@ void clickStartApp2(HWND hdlg)
 #include <taskschd.h>
 #pragma comment(lib, "taskschd.lib")
 
+// 根据当前目录生成唯一任务名，确保不同目录的 ProxyUI 互不干扰
+// 任务名格式: {倒数第2级目录}_{最后一级目录}_{4位hash}_App{d}，如 github_proxyui_a1b2_App1
+void getElevatedTaskName(WCHAR* out, DWORD outSize, int appId)
+{
+	LPCWSTR dir = (LPCWSTR)dirPath;
+	int len = (int)wcslen(dir);
+
+	// 去除末尾的\，避免空尾段
+	while (len > 0 && (dir[len - 1] == L'\\' || dir[len - 1] == L'/'))
+		len--;
+
+	// 找最后一级目录名（向后扫描两个\）
+	LPCWSTR seg1 = NULL;  // 最后一级
+	LPCWSTR seg2 = L"";   // 倒数第二级（可为空）
+	int i = len - 1;
+	while (i >= 0) {
+		if (dir[i] == L'\\' || dir[i] == L'/') {
+			if (seg1 == NULL) {
+				seg1 = dir + i + 1;
+			} else {
+				seg2 = dir + i + 1;
+				break;
+			}
+		}
+		i--;
+	}
+	if (seg1 == NULL) seg1 = dir;  // 整个路径就是目录名
+
+	// 大小写不敏感 hash，只用4位十六进制
+	DWORD hash = 5381;
+	LPCWSTR p = dir;
+	while (*p) {
+		hash = ((hash << 5) + hash) + (*p | 0x20);
+		p++;
+	}
+
+	if (*seg2) {
+		swprintf_s(out, outSize, L"%s_%s_%04X_App%d", seg2, seg1, hash & 0xFFFF, appId);
+	} else {
+		swprintf_s(out, outSize, L"%s_%04X_App%d", seg1, hash & 0xFFFF, appId);
+	}
+}
+
 // 检查计划任务是否存在
 BOOL ScheduledTaskExists(LPCWSTR taskName)
 {
@@ -1332,118 +1375,26 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 	}
 
 	WCHAR taskName[64];
-	wsprintf(taskName, L"ProxyUI_App%d", appId);
+	getElevatedTaskName(taskName, 64, appId);
 
-	HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-	if (FAILED(hr)) {
-		MessageBox(hWnd, TEXT("COM初始化失败"), TEXT("失败"), MB_OK);
-		return FALSE;
-	}
+	// 每次都重建任务（/f 覆盖），确保参数和显示模式始终最新
+	{
+		// dirPath 末尾带\，需先去掉
+		WCHAR cleanDir[MAX_PATH];
+		wcscpy_s(cleanDir, MAX_PATH, (LPCWSTR)dirPath);
+		int cdl = (int)wcslen(cleanDir);
+		while (cdl > 0 && cleanDir[cdl - 1] == L'\\') cleanDir[--cdl] = 0;
 
-	// 连接任务计划服务
-	ITaskService* pService = NULL;
-	hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
-		IID_ITaskService, (void**)&pService);
-	if (FAILED(hr)) {
-		CoUninitialize();
-		MessageBox(hWnd, TEXT("无法连接任务计划服务"), TEXT("失败"), MB_OK);
-		return FALSE;
-	}
-
-	hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-	if (FAILED(hr)) {
-		pService->Release();
-		CoUninitialize();
-		MessageBox(hWnd, TEXT("任务计划服务连接失败"), TEXT("失败"), MB_OK);
-		return FALSE;
-	}
-
-	ITaskFolder* pRootFolder = NULL;
-	hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
-	if (FAILED(hr)) {
-		pService->Release();
-		CoUninitialize();
-		MessageBox(hWnd, TEXT("获取任务文件夹失败"), TEXT("失败"), MB_OK);
-		return FALSE;
-	}
-
-	// 检查任务是否已存在
-	BOOL bTaskExists = FALSE;
-	IRegisteredTask* pExistingTask = NULL;
-	hr = pRootFolder->GetTask(_bstr_t(taskName), &pExistingTask);
-	if (SUCCEEDED(hr) && pExistingTask != NULL) {
-		bTaskExists = TRUE;
-		pExistingTask->Release();
-	}
-
-	// 如果任务已存在，直接运行（不会弹UAC）
-	if (bTaskExists) {
-		IRegisteredTask* pTask = NULL;
-		hr = pRootFolder->GetTask(_bstr_t(taskName), &pTask);
-		if (SUCCEEDED(hr) && pTask != NULL) {
-			// 先更新任务的动作（程序路径和参数可能已变化）
-			ITaskDefinition* pTaskDef = NULL;
-			hr = pTask->get_Definition(&pTaskDef);
-			if (SUCCEEDED(hr)) {
-				IActionCollection* pActions = NULL;
-				hr = pTaskDef->get_Actions(&pActions);
-				if (SUCCEEDED(hr)) {
-					pActions->Clear();
-					IAction* pNewAction = NULL;
-					hr = pActions->Create(TASK_ACTION_EXEC, &pNewAction);
-					if (SUCCEEDED(hr)) {
-						IExecAction* pExecAction = NULL;
-						hr = pNewAction->QueryInterface(IID_IExecAction, (void**)&pExecAction);
-						if (SUCCEEDED(hr)) {
-							pExecAction->put_Path(_bstr_t(exePath));
-							if (wcslen(cmdArgs) > 0) {
-								pExecAction->put_Arguments(_bstr_t(cmdArgs));
-							}
-							pExecAction->put_WorkingDirectory(_bstr_t((LPCWSTR)dirPath));
-							pExecAction->Release();
-						}
-						pNewAction->Release();
-					}
-					pActions->Release();
-				}
-				// 尝试更新任务定义（可能需要管理员权限）
-				pRootFolder->RegisterTaskDefinition(
-					_bstr_t(taskName), pTaskDef, TASK_UPDATE, _variant_t(), _variant_t(),
-					TASK_LOGON_INTERACTIVE_TOKEN, _variant_t(L""), NULL);
-				pTaskDef->Release();
-			}
-
-			// 运行任务（不需要管理员权限）
-			IRunningTask* pRunningTask = NULL;
-			hr = pTask->Run(_variant_t(), &pRunningTask);
-			if (pRunningTask != NULL) {
-				pRunningTask->Release();
-			}
-			pTask->Release();
-
-			if (FAILED(hr)) {
-				pRootFolder->Release();
-				pService->Release();
-				CoUninitialize();
-				MessageBox(hWnd, TEXT("启动计划任务失败"), TEXT("失败"), MB_OK);
-				return FALSE;
-			}
-		} else {
-			pRootFolder->Release();
-			pService->Release();
-			CoUninitialize();
-			MessageBox(hWnd, TEXT("找不到已存在的计划任务"), TEXT("失败"), MB_OK);
-			return FALSE;
-		}
-	} else {
-		// 首次创建任务，尝试用schtasks命令行（需要UAC授权）
-		pRootFolder->Release();
-		pService->Release();
-		CoUninitialize();
-
+		// 用 start /D 设置工作目录替代 cd /d，避免嵌套引号问题
+		// 后台启动时加 /MIN 最小化窗口
 		WCHAR schtasksCmd[2048];
-		swprintf_s(schtasksCmd, L"/create /tn \"%s\" /tr \"\\\"%s\\\" %s\" /sc once /st 00:00 /rl highest /f",
-			taskName, exePath, cmdArgs);
+		if (show) {
+			swprintf_s(schtasksCmd, L"/create /tn \"%s\" /tr \"cmd /c start \\\"\\\" /D \\\"%s\\\" \\\"%s\\\" %s\" /sc once /st 00:00 /sd 2000/01/01 /rl highest /f",
+				taskName, cleanDir, exePath, cmdArgs);
+		} else {
+			swprintf_s(schtasksCmd, L"/create /tn \"%s\" /tr \"cmd /c start /MIN \\\"\\\" /D \\\"%s\\\" \\\"%s\\\" %s\" /sc once /st 00:00 /sd 2000/01/01 /rl highest /f",
+				taskName, cleanDir, exePath, cmdArgs);
+		}
 
 		SHELLEXECUTEINFO sei;
 		ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
@@ -1464,51 +1415,86 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 			}
 			return FALSE;
 		}
-
-		// 等待schtasks完成
 		if (sei.hProcess != NULL) {
 			WaitForSingleObject(sei.hProcess, 30000);
+			DWORD exitCode = 1;
+			GetExitCodeProcess(sei.hProcess, &exitCode);
 			CloseHandle(sei.hProcess);
+			if (exitCode != 0) {
+				WCHAR msg[512];
+				swprintf_s(msg, L"创建计划任务失败 (schtasks exit=%d)\n命令: %s", exitCode, schtasksCmd);
+				MessageBox(hWnd, msg, TEXT("失败"), MB_OK);
+				return FALSE;
+			}
 		}
 
-		// 任务创建完成后，运行它（这里我们重新连接COM）
-		// 简化处理：直接返回成功，标记进程已启动
-		// 注意：对于计划任务启动的进程，我们无法直接获取进程句柄
+		// 再次确认任务创建成功
+		if (!ScheduledTaskExists(taskName)) {
+			MessageBox(hWnd, TEXT("计划任务创建后仍不存在"), TEXT("失败"), MB_OK);
+			return FALSE;
+		}
+	}
+
+	// 运行任务（不需要UAC，schtasks /run 触发任务计划服务执行）
+	WCHAR runCmd[256];
+	swprintf_s(runCmd, L"/run /tn \"%s\"", taskName);
+	SHELLEXECUTEINFO seiRun;
+	ZeroMemory(&seiRun, sizeof(SHELLEXECUTEINFO));
+	seiRun.cbSize = sizeof(SHELLEXECUTEINFO);
+	seiRun.fMask = SEE_MASK_NOCLOSEPROCESS;
+	seiRun.lpFile = L"schtasks.exe";
+	seiRun.lpParameters = runCmd;
+	seiRun.nShow = SW_HIDE;
+	if (!ShellExecuteEx(&seiRun)) {
+		MessageBox(hWnd, TEXT("执行计划任务失败"), TEXT("失败"), MB_OK);
+		return FALSE;
+	}
+	if (seiRun.hProcess != NULL) {
+		WaitForSingleObject(seiRun.hProcess, 10000);
+		DWORD exitCode = 1;
+		GetExitCodeProcess(seiRun.hProcess, &exitCode);
+		CloseHandle(seiRun.hProcess);
+		if (exitCode != 0) {
+			WCHAR msg[512];
+			swprintf_s(msg, L"运行计划任务失败 (schtasks exit=%d)\n任务: %s", exitCode, taskName);
+			MessageBox(hWnd, msg, TEXT("失败"), MB_OK);
+			return FALSE;
+		}
 	}
 
 	// 通过快照查找子进程PID（计划任务启动的进程不是子进程）
 	WCHAR* lastSlash = wcsrchr(exePath, L'\\');
 	LPCWSTR procName = lastSlash ? (lastSlash + 1) : exePath;
 
-	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-	if (hSnapshot != INVALID_HANDLE_VALUE) {
-		PROCESSENTRY32 pe32;
-		pe32.dwSize = sizeof(PROCESSENTRY32);
+	{
 		int retry = 0;
 		while (retry < 20) {
 			Sleep(200);
-			BOOL bFound = FALSE;
-			if (Process32First(hSnapshot, &pe32)) {
-				do {
-					if (_wcsicmp(pe32.szExeFile, procName) == 0) {
-						// 排除已存在的同名进程
-						if (pe32.th32ProcessID != GetCurrentProcessId()) {
-							process->dwProcessId = pe32.th32ProcessID;
-							bFound = TRUE;
-							break;
+			HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+			if (hSnapshot != INVALID_HANDLE_VALUE) {
+				PROCESSENTRY32 pe32;
+				pe32.dwSize = sizeof(PROCESSENTRY32);
+				if (Process32First(hSnapshot, &pe32)) {
+					do {
+						if (_wcsicmp(pe32.szExeFile, procName) == 0) {
+							if (pe32.th32ProcessID != GetCurrentProcessId()) {
+								process->dwProcessId = pe32.th32ProcessID;
+								CloseHandle(hSnapshot);
+								goto foundPid;
+							}
 						}
-					}
-				} while (Process32Next(hSnapshot, &pe32));
+					} while (Process32Next(hSnapshot, &pe32));
+				}
+				CloseHandle(hSnapshot);
 			}
-			if (bFound) break;
 			retry++;
 		}
-		CloseHandle(hSnapshot);
 	}
+foundPid:
 
 	if (process->dwProcessId == 0) {
-		// 无法获取PID，用标记值表示已启动
-		process->dwProcessId = 1;
+		// 进程未找到，启动失败
+		return FALSE;
 	}
 
 	return TRUE;
@@ -1554,7 +1540,7 @@ void stopAppElevated(PROCESS_INFORMATION* process, int appId)
 	} else {
 		// PID=1 表示通过计划任务启动但没获取到PID，停止计划任务
 		WCHAR taskName[64];
-		wsprintf(taskName, L"ProxyUI_App%d", appId);
+		getElevatedTaskName(taskName, 64, appId);
 
 		HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 		if (SUCCEEDED(hr)) {
@@ -1580,6 +1566,25 @@ void stopAppElevated(PROCESS_INFORMATION* process, int appId)
 			}
 			CoUninitialize();
 		}
+	}
+
+	// 删除计划任务，确保下次启动用最新配置重建
+	WCHAR taskName[64];
+	getElevatedTaskName(taskName, 64, appId);
+	WCHAR delCmd[256];
+	swprintf_s(delCmd, L"/delete /tn \"%s\" /f", taskName);
+	SHELLEXECUTEINFO seiDel;
+	ZeroMemory(&seiDel, sizeof(SHELLEXECUTEINFO));
+	seiDel.cbSize = sizeof(SHELLEXECUTEINFO);
+	seiDel.fMask = SEE_MASK_NOCLOSEPROCESS;
+	seiDel.lpVerb = L"runas";
+	seiDel.lpFile = L"schtasks.exe";
+	seiDel.lpParameters = delCmd;
+	seiDel.nShow = SW_HIDE;
+	ShellExecuteEx(&seiDel);
+	if (seiDel.hProcess != NULL) {
+		WaitForSingleObject(seiDel.hProcess, 10000);
+		CloseHandle(seiDel.hProcess);
 	}
 
 	(*process).dwProcessId = 0;
