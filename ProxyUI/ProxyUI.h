@@ -34,6 +34,10 @@ void selectApplication(HWND hWnd, int nIDDlgItem);
 BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show, BOOL uac);
 // 停止应用
 void stopApp(HWND hWnd, PROCESS_INFORMATION* process);
+// 计划任务提权：首次UAC授权，后续静默启动
+BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, BOOL show, int appId);
+void stopAppElevated(PROCESS_INFORMATION* process, int appId);
+BOOL ScheduledTaskExists(LPCWSTR taskName);
 // 发送CLOSE消息
 BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam);
 // 更新全局变量
