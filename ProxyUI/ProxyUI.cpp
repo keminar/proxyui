@@ -332,15 +332,16 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 							GetDlgItemText(hdlg, IDC_EDIT2, (LPTSTR)Params, MAX_PATH);
 							WritePrivateProfileString(TEXT("Program"), TEXT("param1"), Params, iniFile);
 
-						lstrcat(ProxyExe1, TEXT(" "));
-						lstrcat(ProxyExe1, Params);
+						// 把程序路径用双引号包裹，支持带空格路径，与参数合并成一条命令行，避免缓冲区溢出
+						WCHAR cmdLine1[MAX_PATH * 3] = { 0 };
+						_snwprintf_s(cmdLine1, _countof(cmdLine1), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Params);
 						// 是否选中后台
 						UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
-						// 是否申请 UAC 管理员权限
+						// 是否勾选 UAC 管理员权限
 						UINT uac = IsDlgButtonChecked(hdlg, IDC_UAC);
-						// 保存UAC状态至ini，供开机自启读取
+						// 保存UAC状态到ini，供开机自启动读取
 						WritePrivateProfileString(TEXT("ProxyUI"), TEXT("uac1"), uac == BST_CHECKED ? TEXT("open") : TEXT(""), iniFile);
-						BOOL ret = startApp(hdlg, &pro_info, ProxyExe1, sta == BST_UNCHECKED, uac == BST_CHECKED);
+						BOOL ret = startApp(hdlg, &pro_info, cmdLine1, sta == BST_UNCHECKED, uac == BST_CHECKED);
 							if (ret) {
 								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
@@ -352,8 +353,14 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 						break;
 				case IDC_PROXY_STOP1:
 					{
-						stopApp(hdlg, &pro_info);
-						stopAppElevated(&pro_info, 1);  // 清理计划任务
+						// 按启动时记录的 UAC 模式选择停止方式，避免两条路径重复提示授权
+						TCHAR uacStopBuf[MAX_LOADSTRING] = { 0 };
+						GetPrivateProfileString(TEXT("ProxyUI"), TEXT("uac1"), TEXT(""), uacStopBuf, MAX_LOADSTRING, iniFile);
+						if (wcscmp((const wchar_t*)uacStopBuf, (const wchar_t*)TEXT("open")) == 0) {
+							stopAppElevated(&pro_info, 1);  // 提权：结束进程并清理计划任务，一次授权
+						} else {
+							stopApp(hdlg, &pro_info);
+						}
 						if (pro_info.dwProcessId == 0) {
 								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
@@ -500,6 +507,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			// 自动开启服务
 			WCHAR ProxyExe1[MAX_PATH] = { 0 };
 			WCHAR Param1[MAX_PATH] = { 0 };
+			WCHAR cmdLineAuto[MAX_PATH * 3] = { 0 };
 			TCHAR autoBuf[MAX_LOADSTRING] = { 0 };
 			GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto1"), TEXT(""), autoBuf, MAX_LOADSTRING, iniFile);
 			// 从ini读取UAC状态（开机自启时对话框未显示，复选框状态不可靠）
@@ -510,9 +518,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				GetPrivateProfileString(TEXT("Program"), TEXT("app1"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
 				if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
 					GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), Param1, MAX_PATH, iniFile);
-					lstrcat(ProxyExe1, TEXT(" "));
-					lstrcat(ProxyExe1, Param1);
-				startApp(hfDlg, &pro_info, ProxyExe1, false, uacAuto);
+					// 把程序路径用引号包裹，合并参数，避免缓冲区溢出
+					_snwprintf_s(cmdLineAuto, _countof(cmdLineAuto), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Param1);
+					startApp(hfDlg, &pro_info, cmdLineAuto, false, uacAuto);
 			}
 		}
 		GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), autoBuf, MAX_LOADSTRING, iniFile);
@@ -520,9 +528,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			GetPrivateProfileString(TEXT("Program"), TEXT("app2"), TEXT(""), ProxyExe1, MAX_PATH, iniFile);
 			if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
 				GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), Param1, MAX_PATH, iniFile);
-				lstrcat(ProxyExe1, TEXT(" "));
-				lstrcat(ProxyExe1, Param1);
-				startApp(hfDlg, &pro_info2, ProxyExe1, false, false);
+				_snwprintf_s(cmdLineAuto, _countof(cmdLineAuto), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Param1);
+				startApp(hfDlg, &pro_info2, cmdLineAuto, false, false);
 				}
 			}
 			// 显示dialog
@@ -1087,10 +1094,54 @@ void selectApplication(HWND hWnd, int nIDDlgItem)
 	}
 }
 
+// 判断指定 PID 的进程是否仍在运行
+static BOOL IsProcessRunning(DWORD pid)
+{
+	if (pid == 0) return FALSE;
+	BOOL running = FALSE;
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hSnapshot != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32 pe32;
+		pe32.dwSize = sizeof(PROCESSENTRY32);
+		if (Process32First(hSnapshot, &pe32)) {
+			do {
+				if (pe32.th32ProcessID == pid) { running = TRUE; break; }
+			} while (Process32Next(hSnapshot, &pe32));
+		}
+		CloseHandle(hSnapshot);
+	}
+	return running;
+}
+
+// 记录当前系统中指定进程名的所有 PID，返回数量。用于启动后对比找出新进程
+static int SnapshotPidsByName(LPCWSTR procName, DWORD* pids, int maxPids)
+{
+	int n = 0;
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hSnapshot != INVALID_HANDLE_VALUE) {
+		PROCESSENTRY32 pe32;
+		pe32.dwSize = sizeof(PROCESSENTRY32);
+		if (Process32First(hSnapshot, &pe32)) {
+			do {
+				if (_wcsicmp(pe32.szExeFile, procName) == 0) {
+					if (n < maxPids) pids[n++] = pe32.th32ProcessID;
+				}
+			} while (Process32Next(hSnapshot, &pe32));
+		}
+		CloseHandle(hSnapshot);
+	}
+	return n;
+}
+
 // 启动应用（支持 UAC 提权）
 BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL show, BOOL uac)
 {
-	// 检查进程是否在则先停再开
+	// app1 勾选 UAC 时走计划任务提权，其停止/重启由 startAppElevated 内部处理，避免重复停止和重复授权
+	if (uac && process == &pro_info) {
+		return startAppElevated(hWnd, process, ProxyExe1, show, 1);
+	}
+
+	// 普通启动：若已有进程，先停再开
 	if ((*process).dwProcessId > 0) {
 		stopApp(hWnd, process);
 		Sleep(500);
@@ -1101,46 +1152,24 @@ BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 
 	ZeroMemory(process, sizeof(PROCESS_INFORMATION));
 
-	// 分离程序路径和参数
-	WCHAR exePath[MAX_PATH] = { 0 };
-	WCHAR cmdArgs[MAX_PATH * 2] = { 0 };
-	wcscpy_s(exePath, MAX_PATH, ProxyExe1);
-
-	// 查找第一个空格，分离出程序路径和参数
-	WCHAR* spacePos = wcschr(ProxyExe1, L' ');
-	if (spacePos != NULL) {
-		// 截取程序路径
-		size_t pathLen = spacePos - ProxyExe1;
-		wcsncpy_s(exePath, MAX_PATH, ProxyExe1, pathLen);
-		// 截取参数（跳过空格）
-		wcscpy_s(cmdArgs, MAX_PATH * 2, spacePos + 1);
+	// 以当前权限启动（子进程继承 ProxyUI 权限）
+	STARTUPINFO sti;
+	ZeroMemory(&sti, sizeof(STARTUPINFO));
+	sti.cb = sizeof(sti);
+	if (!show) {
+		sti.dwFlags = STARTF_USESHOWWINDOW;
+		sti.wShowWindow = SW_HIDE;
 	}
-
-	BOOL bRet = FALSE;
-
-	if (uac && process == &pro_info) {
-		// 仅app1使用计划任务提权：首次UAC授权，后续静默启动
-		return startAppElevated(hWnd, process, ProxyExe1, show, 1);
-	} else {
-		// 不使用 UAC，直接以当前权限启动（继承 ProxyUI 权限）
-		STARTUPINFO sti;
-		ZeroMemory(&sti, sizeof(STARTUPINFO));
-		sti.cb = sizeof(sti);
-		if (!show) {
-			sti.dwFlags = STARTF_USESHOWWINDOW;
-			sti.wShowWindow = SW_HIDE;
-		}
-		//dirPath指定新进程的工作路径，解决开机自启动工作路径是C:\Windows\SysWOW64，子进程配置相对路径时找不到配置文件的bug
-		bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, dirPath, &sti, process);
-		if (!bRet) {
-			MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
-			return FALSE;
-		}
-		// 关闭子进程句柄
-		CloseHandle((*process).hThread);
-		CloseHandle((*process).hProcess);
+	// ProxyExe1 已将程序路径用引号包裹，支持带空格路径，CreateProcess 可正确解析
+	// dirPath 指定新进程工作目录，避免继承默认目录（如 C:\Windows\SysWOW64）导致相对路径找不到文件
+	BOOL bRet = CreateProcess(NULL, ProxyExe1, NULL, NULL, FALSE, 0, NULL, dirPath, &sti, process);
+	if (!bRet) {
+		MessageBox(hWnd, TEXT("启动失败"), TEXT("失败"), MB_OK);
+		return FALSE;
 	}
-
+	// 关闭子进程句柄
+	CloseHandle((*process).hThread);
+	CloseHandle((*process).hProcess);
 	return TRUE;
 }
 
@@ -1184,7 +1213,10 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 				CloseHandle(sei.hProcess);
 			}
 		}
-		(*process).dwProcessId = 0;
+		// 验证是否确实被终止，未终止则保持 PID（避免误清零掩盖杀错进程的问题）
+		if (!IsProcessRunning((*process).dwProcessId)) {
+			(*process).dwProcessId = 0;
+		}
 		return;
 	}
 
@@ -1213,7 +1245,10 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 		TerminateProcess(hProc, dwExitCode);//终止进程
 	}
 
-	(*process).dwProcessId = 0;
+	// 验证是否被终止，仍在运行则保持 PID
+	if (!IsProcessRunning((*process).dwProcessId)) {
+		(*process).dwProcessId = 0;
+	}
 	CloseHandle(hProc);
 }
 
@@ -1241,14 +1276,14 @@ void clickStartApp2(HWND hdlg)
 	SendMessage(hComboBox, CB_GETLBTEXT, idx_row, (LPARAM)selectText);
 	WritePrivateProfileString(TEXT("Program"), TEXT("selected"), selectText, iniFile);
 
-	// 拼接命令
-	lstrcat(ProxyExe2, TEXT(" "));
-	lstrcat(ProxyExe2, Params);
+	// 把程序路径用引号包裹，合并参数，避免缓冲区溢出
+	WCHAR cmdLine2[MAX_PATH * 3] = { 0 };
+	_snwprintf_s(cmdLine2, _countof(cmdLine2), _TRUNCATE, L"\"%s\" %s", ProxyExe2, Params);
 	//MessageBox(hdlg, ProxyExe2, TEXT("失败"), MB_OK);
 
 	// 是否选中后台
 	UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
-	BOOL ret = startApp(hdlg, &pro_info2, ProxyExe2, sta == BST_UNCHECKED, false);
+	BOOL ret = startApp(hdlg, &pro_info2, cmdLine2, sta == BST_UNCHECKED, false);
 	if (ret) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
@@ -1364,15 +1399,32 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 
 	ZeroMemory(process, sizeof(PROCESS_INFORMATION));
 
-	// 分离程序路径和参数
+	// 分离程序路径和参数（支持带空格路径用引号包裹）
 	WCHAR exePath[MAX_PATH] = { 0 };
 	WCHAR cmdArgs[MAX_PATH * 2] = { 0 };
-	wcscpy_s(exePath, MAX_PATH, cmdLine);
-	WCHAR* spacePos = wcschr(cmdLine, L' ');
-	if (spacePos != NULL) {
-		size_t pathLen = spacePos - cmdLine;
-		wcsncpy_s(exePath, MAX_PATH, cmdLine, pathLen);
-		wcscpy_s(cmdArgs, MAX_PATH * 2, spacePos + 1);
+	if (cmdLine[0] == L'"') {
+		// 路径被引号包裹，取引号内为路径，其后为参数
+		WCHAR* closeQ = wcschr(cmdLine + 1, L'"');
+		if (closeQ != NULL) {
+			size_t pathLen = closeQ - (cmdLine + 1);
+			if (pathLen >= MAX_PATH) pathLen = MAX_PATH - 1;
+			wcsncpy_s(exePath, MAX_PATH, cmdLine + 1, pathLen);
+			const WCHAR* argp = closeQ + 1;
+			while (*argp == L' ') argp++;
+			wcscpy_s(cmdArgs, MAX_PATH * 2, argp);
+		} else {
+			wcscpy_s(exePath, MAX_PATH, cmdLine + 1);
+		}
+	} else {
+		WCHAR* spacePos = wcschr(cmdLine, L' ');
+		if (spacePos != NULL) {
+			size_t pathLen = spacePos - cmdLine;
+			if (pathLen >= MAX_PATH) pathLen = MAX_PATH - 1;
+			wcsncpy_s(exePath, MAX_PATH, cmdLine, pathLen);
+			wcscpy_s(cmdArgs, MAX_PATH * 2, spacePos + 1);
+		} else {
+			wcscpy_s(exePath, MAX_PATH, cmdLine);
+		}
 	}
 
 	WCHAR taskName[64];
@@ -1455,7 +1507,13 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 		}
 	}
 
-	// 用 COM API 运行任务，不经过 schtasks.exe，无控制台窗口
+	// 启动前记录已存在的同名进程 PID，便于启动后区分出新进程（多开时不再认错 PID）
+	WCHAR* preLastSlash = wcsrchr(exePath, L'\\');
+	LPCWSTR procName = preLastSlash ? (preLastSlash + 1) : exePath;
+	DWORD preExisting[256];
+	int preCount = SnapshotPidsByName(procName, preExisting, 256);
+
+	// 用 COM API 触发任务，不依赖 schtasks.exe（无控制台窗口）
 	{
 		HRESULT hr = E_FAIL;
 		HRESULT hrInit = CoInitializeEx(NULL, COINIT_MULTITHREADED);
@@ -1491,13 +1549,10 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 		}
 	}
 
-	// 通过快照查找子进程PID（计划任务启动的进程不是子进程）
-	WCHAR* lastSlash = wcsrchr(exePath, L'\\');
-	LPCWSTR procName = lastSlash ? (lastSlash + 1) : exePath;
-
+	// 等待新进程出现：只接受不在 preExisting 中的新 PID，确保是本次启动的实例
 	{
 		int retry = 0;
-		while (retry < 20) {
+		while (retry < 30) {
 			Sleep(200);
 			HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 			if (hSnapshot != INVALID_HANDLE_VALUE) {
@@ -1505,8 +1560,13 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 				pe32.dwSize = sizeof(PROCESSENTRY32);
 				if (Process32First(hSnapshot, &pe32)) {
 					do {
-						if (_wcsicmp(pe32.szExeFile, procName) == 0) {
-							if (pe32.th32ProcessID != GetCurrentProcessId()) {
+						if (_wcsicmp(pe32.szExeFile, procName) == 0 &&
+							pe32.th32ProcessID != GetCurrentProcessId()) {
+							BOOL isOld = FALSE;
+							for (int k = 0; k < preCount; k++) {
+								if (preExisting[k] == pe32.th32ProcessID) { isOld = TRUE; break; }
+							}
+							if (!isOld) {
 								process->dwProcessId = pe32.th32ProcessID;
 								CloseHandle(hSnapshot);
 								goto foundPid;
@@ -1522,126 +1582,99 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 foundPid:
 
 	if (process->dwProcessId == 0) {
-		// 进程未找到，启动失败
+		// 超时未找到新进程，视为失败
 		return FALSE;
 	}
 
 	return TRUE;
 }
 
-// 停止通过计划任务启动的应用
+// 停止通过计划任务启动的应用（结束进程 + 删除计划任务 + 删除 VBS，尽量合并到一次提权）
 void stopAppElevated(PROCESS_INFORMATION* process, int appId)
 {
-	// 不再因 PID==0 提前返回，这样停止按钮关闭进程后仍可清理计划任务
+	WCHAR taskName[64];
+	getElevatedTaskName(taskName, 64, appId);
+	DWORD pid = (*process).dwProcessId;
 
-	// 先尝试终止进程（PID>0 时有效）
-	if ((*process).dwProcessId > 1) {
-		HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
+	// VBS 临时脚本路径（dirPath 末尾的 \ 先去掉）
+	WCHAR cleanDir[MAX_PATH];
+	wcscpy_s(cleanDir, MAX_PATH, (LPCWSTR)dirPath);
+	int cdl = (int)wcslen(cleanDir);
+	while (cdl > 0 && cleanDir[cdl - 1] == L'\\') cleanDir[--cdl] = 0;
+	WCHAR vbsPath[MAX_PATH];
+	swprintf_s(vbsPath, MAX_PATH, L"%s\\_pl%d.vbs", cleanDir, appId);
+
+	// 1) 先尝试不提权结束进程（ProxyUI 未提权、进程也非提权时可成功）
+	if (pid > 1) {
+		HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pid);
 		if (hProc != NULL) {
-			EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)(*process).dwProcessId);
+			EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)pid);
 			if (WaitForSingleObject(hProc, 2000) != WAIT_OBJECT_0) {
 				DWORD dwExitCode = 0;
 				GetExitCodeProcess(hProc, &dwExitCode);
 				TerminateProcess(hProc, dwExitCode);
 			}
 			CloseHandle(hProc);
-		} else {
-			// 权限不足，使用taskkill
-			WCHAR cmdLine[256];
-			wsprintf(cmdLine, L"/PID %lu /F", (*process).dwProcessId);
-			SHELLEXECUTEINFO sei;
-			ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
-			sei.cbSize = sizeof(SHELLEXECUTEINFO);
-			sei.fMask = SEE_MASK_NOCLOSEPROCESS;
-			sei.lpVerb = L"runas";
-			sei.lpFile = L"taskkill.exe";
-			sei.lpParameters = cmdLine;
-			sei.nShow = SW_HIDE;
-			if (ShellExecuteEx(&sei)) {
-				if (sei.hProcess != NULL) {
-					WaitForSingleObject(sei.hProcess, 5000);
-					CloseHandle(sei.hProcess);
-				}
-			}
 		}
-	} else {
-		// PID=1 表示通过计划任务启动但没获取到PID，停止计划任务
-		WCHAR taskName[64];
-		getElevatedTaskName(taskName, 64, appId);
+	}
 
+	// 2) 先尝试用 COM 停止并删除计划任务（有权限时生效，无窗口无提示）
+	{
 		HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
 		if (SUCCEEDED(hr)) {
 			ITaskService* pService = NULL;
-			hr = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
-				IID_ITaskService, (void**)&pService);
-			if (SUCCEEDED(hr)) {
-				hr = pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-				if (SUCCEEDED(hr)) {
-					ITaskFolder* pRootFolder = NULL;
-					hr = pService->GetFolder(_bstr_t(L"\\"), &pRootFolder);
-					if (SUCCEEDED(hr)) {
+			if (SUCCEEDED(CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
+				IID_ITaskService, (void**)&pService))) {
+				if (SUCCEEDED(pService->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t()))) {
+					ITaskFolder* pRoot = NULL;
+					if (SUCCEEDED(pService->GetFolder(_bstr_t(L"\\"), &pRoot))) {
 						IRegisteredTask* pTask = NULL;
-						hr = pRootFolder->GetTask(_bstr_t(taskName), &pTask);
-						if (SUCCEEDED(hr) && pTask != NULL) {
+						if (SUCCEEDED(pRoot->GetTask(_bstr_t(taskName), &pTask)) && pTask != NULL) {
 							pTask->Stop(0);
 							pTask->Release();
 						}
-						pRootFolder->Release();
+						pRoot->DeleteTask(_bstr_t(taskName), 0);
+						pRoot->Release();
 					}
-					pService->Release();
 				}
+				pService->Release();
 			}
 			CoUninitialize();
 		}
 	}
 
-	// 删除计划任务：先尝试 COM（进程已提权时生效），失败则走 UAC 弹窗
-	{
-		WCHAR taskNameDel[64];
-		getElevatedTaskName(taskNameDel, 64, appId);
-		BOOL deleted = FALSE;
-
-		// 方案1: COM API（无需额外UAC，仅当进程已提权时有效）
-		HRESULT hrDel = CoInitializeEx(NULL, COINIT_MULTITHREADED);
-		if (SUCCEEDED(hrDel)) {
-			ITaskService* pServiceDel = NULL;
-			hrDel = CoCreateInstance(CLSID_TaskScheduler, NULL, CLSCTX_INPROC_SERVER,
-				IID_ITaskService, (void**)&pServiceDel);
-			if (SUCCEEDED(hrDel)) {
-				hrDel = pServiceDel->Connect(_variant_t(), _variant_t(), _variant_t(), _variant_t());
-				if (SUCCEEDED(hrDel)) {
-					ITaskFolder* pRootFolderDel = NULL;
-					hrDel = pServiceDel->GetFolder(_bstr_t(L"\\"), &pRootFolderDel);
-					if (SUCCEEDED(hrDel)) {
-						hrDel = pRootFolderDel->DeleteTask(_bstr_t(taskNameDel), 0);
-						pRootFolderDel->Release();
-						if (SUCCEEDED(hrDel)) deleted = TRUE;
-					}
-				}
-				pServiceDel->Release();
-			}
-			CoUninitialize();
+	// 3) 若进程或任务仍在，用「一次」提权命令一并结束进程、删除计划任务、删 VBS
+	BOOL procAlive = (pid > 1 && IsProcessRunning(pid));
+	BOOL taskAlive = ScheduledTaskExists(taskName);
+	if (procAlive || taskAlive) {
+		WCHAR elevCmd[1024];
+		if (procAlive) {
+			swprintf_s(elevCmd, L"/c taskkill /PID %lu /F & schtasks /delete /tn \"%s\" /f & del \"%s\"",
+				pid, taskName, vbsPath);
+		} else {
+			swprintf_s(elevCmd, L"/c schtasks /delete /tn \"%s\" /f & del \"%s\"",
+				taskName, vbsPath);
 		}
-
-		// 方案2: COM 失败（进程未提权），走 UAC 弹窗授权
-		if (!deleted) {
-			WCHAR delCmd[512];
-			swprintf_s(delCmd, L"/c schtasks /delete /tn \"%s\" /f", taskNameDel);
-			SHELLEXECUTEINFO seiDel = { sizeof(seiDel) };
-			seiDel.fMask = SEE_MASK_NOCLOSEPROCESS;
-			seiDel.hwnd = hfDlg;
-			seiDel.lpVerb = L"runas";
-			seiDel.lpFile = L"cmd.exe";
-			seiDel.lpParameters = delCmd;
-			seiDel.nShow = SW_HIDE;
-			if (ShellExecuteEx(&seiDel) && seiDel.hProcess != NULL) {
-				WaitForSingleObject(seiDel.hProcess, 10000);
-				CloseHandle(seiDel.hProcess);
-			}
+		SHELLEXECUTEINFO sei = { sizeof(sei) };
+		sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+		sei.hwnd = hfDlg;
+		sei.lpVerb = L"runas";
+		sei.lpFile = L"cmd.exe";
+		sei.lpParameters = elevCmd;
+		sei.nShow = SW_HIDE;
+		if (ShellExecuteEx(&sei) && sei.hProcess != NULL) {
+			WaitForSingleObject(sei.hProcess, 10000);
+			CloseHandle(sei.hProcess);
 		}
+	} else {
+		// 进程和任务都没了，顺手删掉不需要提权的 VBS 文件
+		DeleteFileW(vbsPath);
 	}
 
-	(*process).dwProcessId = 0;
+	// 验证进程是否已终止，仍在运行则保持 PID（UI 显示运行中，可再次停止）
+	if (!IsProcessRunning((*process).dwProcessId)) {
+		(*process).dwProcessId = 0;
+	}
 }
 
 // 显示错误
