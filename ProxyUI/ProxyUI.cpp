@@ -1143,8 +1143,13 @@ BOOL startApp(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* ProxyExe1, BOOL sh
 
 	// 普通启动：若已有进程，先停再开
 	if ((*process).dwProcessId > 0) {
-		stopApp(hWnd, process);
-		Sleep(500);
+		// app1 可能上次是"提权/计划任务"方式启动，用 stopAppElevated 一并清理残留任务与进程；否则普通停止
+		if (process == &pro_info) {
+			stopAppElevated(process, 1);
+		} else {
+			stopApp(hWnd, process);
+		}
+		Sleep(300);
 		if ((*process).dwProcessId > 0) {//停止失败
 			return FALSE;
 		}
@@ -1385,15 +1390,78 @@ BOOL ScheduledTaskExists(LPCWSTR taskName)
 	return TRUE;
 }
 
-// 创建并运行计划任务实现提权（首次UAC授权，后续静默启动）
+// djb2 计算命令行 hash，用于判断重启时命令是否变化
+static DWORD HashCmd(LPCWSTR s)
+{
+	DWORD h = 5381;
+	while (*s) { h = ((h << 5) + h) + (DWORD)(*s); s++; }
+	return h;
+}
+
+// 结束指定 PID 的进程：先尝试直接结束，权限不足再用 taskkill 提权；轮询等待其真正退出。返回是否已结束
+static BOOL KillProcessByPid(DWORD pid)
+{
+	if (pid <= 1) return TRUE;
+	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pid);
+	if (hProc != NULL) {
+		EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)pid);
+		if (WaitForSingleObject(hProc, 1500) != WAIT_OBJECT_0) {
+			DWORD ec = 0;
+			GetExitCodeProcess(hProc, &ec);
+			TerminateProcess(hProc, ec);
+		}
+		CloseHandle(hProc);
+	} else {
+		WCHAR pidStr[32] = { 0 };
+		wsprintf(pidStr, L"/PID %lu /F", pid);
+		SHELLEXECUTEINFO sei;
+		ZeroMemory(&sei, sizeof(SHELLEXECUTEINFO));
+		sei.cbSize = sizeof(SHELLEXECUTEINFO);
+		sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+		sei.lpVerb = L"runas";
+		sei.lpFile = L"taskkill.exe";
+		sei.lpParameters = pidStr;
+		sei.nShow = SW_HIDE;
+		if (ShellExecuteEx(&sei) && sei.hProcess != NULL) {
+			WaitForSingleObject(sei.hProcess, 5000);
+			CloseHandle(sei.hProcess);
+		}
+	}
+	// 轮询等待进程真正退出（taskkill 是异步的，避免进程还没消失就误判失败导致"点两次"）
+	for (int i = 0; i < 30 && IsProcessRunning(pid); i++) {
+		Sleep(100);
+	}
+	return !IsProcessRunning(pid);
+}
+
+// 用计划任务实现提权（首次 UAC 授权，后续静默运行）
 BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, BOOL show, int appId)
 {
-	// 检查进程是否在则先停再开
+	WCHAR taskName[64];
+	getElevatedTaskName(taskName, 64, appId);
+	// hash 包含命令行与"后台"标志：命令或后台变化都会使 hash 不同，从而触发重建任务
+	DWORD curHash = (HashCmd(cmdLine) << 1) | (show ? 1u : 0u);
+	BOOL reuseTask = FALSE;
+
+	// 若已有进程在跑（重启）：命令与后台都没变、且任务仍在，则重用任务，只结束旧进程（省去删/建任务的授权）
 	if ((*process).dwProcessId > 0) {
-		stopAppElevated(process, appId);
-		Sleep(500);
-		if ((*process).dwProcessId > 0) {
-			return FALSE;
+		WCHAR hashKey[24] = { 0 }, hbuf[24] = { 0 }, curHashStr[24] = { 0 };
+		swprintf_s(hashKey, L"elevhash%d", appId);
+		swprintf_s(curHashStr, L"%08X", curHash);
+		GetPrivateProfileString(TEXT("ProxyUI"), hashKey, TEXT(""), hbuf, 24, iniFile);
+		if (wcscmp((const wchar_t*)hbuf, (const wchar_t*)curHashStr) == 0 && ScheduledTaskExists(taskName)) {
+			// 命令与后台都没变：重用现有任务，只结束旧进程（一次提权），随后重新触发任务
+			reuseTask = TRUE;
+			if (!KillProcessByPid((*process).dwProcessId)) {
+				return FALSE;  // 旧进程未结束（如取消提权），放弃以避免多开
+			}
+		} else {
+			// 命令/后台变化或任务丢失：完整停止（结束旧进程 + 删任务），随后重建
+			stopAppElevated(process, appId);
+			Sleep(300);
+			if ((*process).dwProcessId > 0) {
+				return FALSE;
+			}
 		}
 	}
 
@@ -1427,10 +1495,8 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 		}
 	}
 
-	WCHAR taskName[64];
-	getElevatedTaskName(taskName, 64, appId);
-
-	// 每次都重建任务（/f 覆盖），确保参数和显示模式始终最新
+	// 命令首次设置或已变化：（重）创建计划任务；命令与后台都没变的重启会重用现有任务，跳过创建
+	if (!reuseTask)
 	{
 		// dirPath 末尾带\，需先去掉
 		WCHAR cleanDir[MAX_PATH];
@@ -1505,6 +1571,11 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 			MessageBox(hWnd, TEXT("计划任务创建后仍不存在"), TEXT("失败"), MB_OK);
 			return FALSE;
 		}
+		// 记录本次命令+后台的 hash，供下次重启判断是否变化以决定能否重用任务
+		WCHAR hkey[24] = { 0 }, hstr[24] = { 0 };
+		swprintf_s(hkey, L"elevhash%d", appId);
+		swprintf_s(hstr, L"%08X", curHash);
+		WritePrivateProfileString(TEXT("ProxyUI"), hkey, hstr, iniFile);
 	}
 
 	// 启动前记录已存在的同名进程 PID，便于启动后区分出新进程（多开时不再认错 PID）
@@ -1671,7 +1742,10 @@ void stopAppElevated(PROCESS_INFORMATION* process, int appId)
 		DeleteFileW(vbsPath);
 	}
 
-	// 验证进程是否已终止，仍在运行则保持 PID（UI 显示运行中，可再次停止）
+	// 轮询等待进程真正退出后再清零 PID（避免异步 kill 未完成就误判，导致"点两次"）
+	for (int i = 0; i < 30 && IsProcessRunning((*process).dwProcessId); i++) {
+		Sleep(100);
+	}
 	if (!IsProcessRunning((*process).dwProcessId)) {
 		(*process).dwProcessId = 0;
 	}
