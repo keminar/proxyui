@@ -1200,6 +1200,12 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 
 	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, (*process).dwProcessId);
 	if (hProc == NULL) {
+		// 打不开进程：先确认它是否真的还在。若已退出（PID 失效/被系统回收），
+		// 直接清空并返回，避免对已不存在或被复用该 PID 的进程执行提权 taskkill 而误弹 UAC
+		if (!IsProcessRunning((*process).dwProcessId)) {
+			(*process).dwProcessId = 0;
+			return;
+		}
 		// 可能因为权限不足无法打开管理员进程，尝试使用 taskkill 提权终止
 		WCHAR pidStr[32] = { 0 };
 		wsprintf(pidStr, L"/PID %lu /F", (*process).dwProcessId);
@@ -1402,6 +1408,7 @@ static DWORD HashCmd(LPCWSTR s)
 static BOOL KillProcessByPid(DWORD pid)
 {
 	if (pid <= 1) return TRUE;
+	if (!IsProcessRunning(pid)) return TRUE;  // 进程已退出，无需（提权）强杀，避免误弹 UAC
 	HANDLE hProc = OpenProcess(SYNCHRONIZE | PROCESS_TERMINATE, FALSE, pid);
 	if (hProc != NULL) {
 		EnumWindows((WNDENUMPROC)TerminateAppEnum, (LPARAM)pid);
@@ -1449,11 +1456,15 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 		swprintf_s(hashKey, L"elevhash%d", appId);
 		swprintf_s(curHashStr, L"%08X", curHash);
 		GetPrivateProfileString(TEXT("ProxyUI"), hashKey, TEXT(""), hbuf, 24, iniFile);
-		if (wcscmp((const wchar_t*)hbuf, (const wchar_t*)curHashStr) == 0 && ScheduledTaskExists(taskName)) {
-			// 命令与后台都没变：重用现有任务，只结束旧进程（一次提权），随后重新触发任务
-			reuseTask = TRUE;
+		if (wcscmp((const wchar_t*)hbuf, (const wchar_t*)curHashStr) == 0) {
+			// 命令行+后台没变：先杀旧的管理员进程（这步需提权、会立即弹UAC），
+			// 把耗时的计划任务COM查询挪到杀进程之后，避免"点击后卡几秒才弹UAC"
 			if (!KillProcessByPid((*process).dwProcessId)) {
-				return FALSE;  // 旧进程未结束（如取消提权），放弃以避免多开
+				return FALSE;  // 旧进程未能杀掉（如取消提权），保持原状避免多开
+			}
+			// 杀完再确认任务是否还在：在则复用（跳过重建），不在才落到下面重建路径
+			if (ScheduledTaskExists(taskName)) {
+				reuseTask = TRUE;
 			}
 		} else {
 			// 命令/后台变化或任务丢失：完整停止（结束旧进程 + 删任务），随后重建
@@ -1462,6 +1473,17 @@ BOOL startAppElevated(HWND hWnd, PROCESS_INFORMATION* process, WCHAR* cmdLine, B
 			if ((*process).dwProcessId > 0) {
 				return FALSE;
 			}
+		}
+	}
+	// 开机首次启动时进程未运行：若计划任务已存在且命令行未变化，直接复用，
+	// 用 COM 执行已有任务（无需 UAC），避免每次开机弹出授权框
+	else if (ScheduledTaskExists(taskName)) {
+		WCHAR hashKey[24] = { 0 }, hbuf[24] = { 0 }, curHashStr[24] = { 0 };
+		swprintf_s(hashKey, L"elevhash%d", appId);
+		swprintf_s(curHashStr, L"%08X", curHash);
+		GetPrivateProfileString(TEXT("ProxyUI"), hashKey, TEXT(""), hbuf, 24, iniFile);
+		if (wcscmp((const wchar_t*)hbuf, (const wchar_t*)curHashStr) == 0) {
+			reuseTask = TRUE;
 		}
 	}
 
