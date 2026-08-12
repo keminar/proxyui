@@ -1254,6 +1254,9 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 		// 获取子进程的退出码 
 		GetExitCodeProcess(hProc, &dwExitCode);
 		TerminateProcess(hProc, dwExitCode);//终止进程
+		// TerminateProcess 只是异步请求，进程不一定已被内核回收；持句柄等它真正退出再判断，
+		// 否则过早的 IsProcessRunning 可能仍为真、dwProcessId 未清零，上层会误判"停止失败"而拒绝重启
+		WaitForSingleObject(hProc, 2000);
 	}
 
 	// 验证是否被终止，仍在运行则保持 PID
