@@ -156,7 +156,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // 将实例句柄存储在全局变量中
 
-   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
+   HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX),
       CW_USEDEFAULT, CW_USEDEFAULT, 660, 530, nullptr, nullptr, hInstance, nullptr);
 
    if (!hWnd)
@@ -477,16 +477,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 	case WM_CREATE: // 先于InitInstance方法被调用
 		{
-			HWND hWndSys = CreateWindowEx(WS_EX_STATICEDGE, L"STATIC", L"系统代理",
+			HWND hWndSys = CreateWindowEx(0, L"STATIC", L"系统代理",
 				WS_VISIBLE | WS_CHILD | WS_BORDER | SS_CENTER | SS_CENTERIMAGE,
 				10, 10, 98, 30,
 				hWnd, NULL, NULL, NULL);
-			hWndComboBox = CreateWindowEx(WS_EX_STATICEDGE, L"COMBOBOX", L"下拉框",
-				CBS_DROPDOWN | CBS_HASSTRINGS | WS_VISIBLE | WS_CHILD | WS_BORDER,
-				120, 10, 350, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
-			hWndBtn1 = CreateWindowEx(WS_EX_STATICEDGE, L"BUTTON", L"确定",
+			hWndComboBox = CreateWindowEx(0, L"COMBOBOX", L"下拉框",
+				CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VISIBLE | WS_CHILD,
+				120, 10, 390, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
+			hWndBtn1 = CreateWindowEx(0, L"BUTTON", L"确定",
 				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				480, 10, 70, 30,
+				520, 10, 70, 30,
 				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
 			
 			// 添加默认代理选项
