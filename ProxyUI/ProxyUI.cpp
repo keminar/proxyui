@@ -43,6 +43,26 @@ PROCESS_INFORMATION pro_info2; //进程信息
 HWND hWndComboBox, hWndBtn1;
 HWND hfDlg;
 
+// 异步任务消息与常量
+#define WM_APP_JOBDONE (WM_APP + 10)  // 工作线程完成后回发
+#define JOB_START 1
+#define JOB_STOP  2
+
+// 异步任务上下文:启动/停止都放到工作线程执行,UI线程不再阻塞
+struct AsyncJob {
+	int appId;                    // 1 或 2
+	int action;                   // JOB_START / JOB_STOP
+	PROCESS_INFORMATION* process; // 指向 pro_info / pro_info2
+	WCHAR cmdLine[MAX_PATH * 3];
+	BOOL show;
+	BOOL uac;
+	HWND hdlg;                    // FORMVIEW 对话框,用于回发结果
+	BOOL ok;                      // 执行结果
+};
+// 两个程序各自的忙碌标记,防止任务进行中重复触发
+volatile LONG g_jobBusy1 = 0;
+volatile LONG g_jobBusy2 = 0;
+
 #define CloseProxy TEXT("无代理")
 #define RegRun L"Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define RegName L"ProxyUI"
@@ -266,13 +286,13 @@ void initFormData(HWND hdlg)
 	CheckDlgButton(hdlg, IDC_UAC, (wcscmp((const wchar_t*)uacBuf, (const wchar_t*)TEXT("open")) == 0) ? BST_CHECKED : BST_UNCHECKED);
 
 	// 程序运行状态
-	if (pro_info.dwProcessId > 0) {
+	if (pro_info.dwProcessId > 0 && g_jobBusy1 == 0) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
 		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
 	}
-	if (pro_info2.dwProcessId > 0) {
+	if (pro_info2.dwProcessId > 0 && g_jobBusy2 == 0) {
 		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
 		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
 		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
@@ -306,6 +326,37 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				EndPaint(hdlg, &ps);
 			}
 			break;
+		case WM_APP_JOBDONE:
+			{
+				// 工作线程完成:在UI线程刷新状态文字/按钮/托盘并解除忙碌
+				AsyncJob* job = (AsyncJob*)wParam;
+				int appId = job->appId;
+				HWND hStatus = GetDlgItem(hdlg, (appId == 1) ? IDC_STATIC1 : IDC_STATIC2);
+				HWND hStart  = GetDlgItem(hdlg, (appId == 1) ? IDC_PROXY_START1 : IDC_PROXY_START2);
+				HWND hStop   = GetDlgItem(hdlg, (appId == 1) ? IDC_PROXY_STOP1 : IDC_PROXY_STOP2);
+				if (job->action == JOB_START) {
+					if (job->ok) {
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+						SendMessage(hStart, WM_SETTEXT, NULL, (LPARAM)L"重启");
+					} else {
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+						SendMessage(hStart, WM_SETTEXT, NULL, (LPARAM)L"启动");
+					}
+				} else {
+					if (job->process->dwProcessId == 0) {
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
+						SendMessage(hStart, WM_SETTEXT, NULL, (LPARAM)L"启动");
+					} else {
+						SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
+					}
+				}
+				EnableWindow(hStart, TRUE);
+				EnableWindow(hStop, TRUE);
+				BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
+				InterlockedExchange((appId == 1) ? &g_jobBusy1 : &g_jobBusy2, 0);
+				delete job;
+			}
+			break;
 		case WM_COMMAND:
 			{
 				int wmId = LOWORD(wParam);
@@ -322,7 +373,7 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 							WCHAR ProxyExe1[MAX_PATH] = { 0 };
 							GetDlgItemText(hdlg, IDC_PROXY_CMD1, (LPTSTR)ProxyExe1, MAX_PATH);
 							if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) == 0) {
-								MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
+								MessageBox(hdlg, TEXT("请选择程序"), TEXT("失败"), MB_OK);
 								break;
 							}
 							// 先把变量写入
@@ -332,42 +383,29 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 							GetDlgItemText(hdlg, IDC_EDIT2, (LPTSTR)Params, MAX_PATH);
 							WritePrivateProfileString(TEXT("Program"), TEXT("param1"), Params, iniFile);
 
-						// 把程序路径用双引号包裹，支持带空格路径，与参数合并成一条命令行，避免缓冲区溢出
-						WCHAR cmdLine1[MAX_PATH * 3] = { 0 };
-						_snwprintf_s(cmdLine1, _countof(cmdLine1), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Params);
-						// 是否选中后台
-						UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
-						// 是否勾选 UAC 管理员权限
-						UINT uac = IsDlgButtonChecked(hdlg, IDC_UAC);
-						// 保存UAC状态到ini，供开机自启动读取
-						WritePrivateProfileString(TEXT("ProxyUI"), TEXT("uac1"), uac == BST_CHECKED ? TEXT("open") : TEXT(""), iniFile);
-						BOOL ret = startApp(hdlg, &pro_info, cmdLine1, sta == BST_UNCHECKED, uac == BST_CHECKED);
-							if (ret) {
-								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
-								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
-								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
-								SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
-							}
-							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
+							// 把程序路径用双引号包起来,支持带空格路径,与参数合并成一条命令行
+							WCHAR cmdLine1[MAX_PATH * 3] = { 0 };
+							_snwprintf_s(cmdLine1, _countof(cmdLine1), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Params);
+							// 是否勾选后台
+							UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK1);
+							// 是否勾选 UAC 管理员权限
+							UINT uac = IsDlgButtonChecked(hdlg, IDC_UAC);
+							// 保存UAC状态到ini,供开机自启读取
+							WritePrivateProfileString(TEXT("ProxyUI"), TEXT("uac1"), uac == BST_CHECKED ? TEXT("open") : TEXT(""), iniFile);
+							// 放到工作线程执行,UI 不再卡顿
+							SetJobBusyUI(hdlg, 1, TRUE);
+							LaunchProxyJob(hdlg, 1, JOB_START, &pro_info, cmdLine1, sta == BST_UNCHECKED, uac == BST_CHECKED);
 						}
 						break;
-				case IDC_PROXY_STOP1:
-					{
-						// 按启动时记录的 UAC 模式选择停止方式，避免两条路径重复提示授权
-						TCHAR uacStopBuf[MAX_LOADSTRING] = { 0 };
-						GetPrivateProfileString(TEXT("ProxyUI"), TEXT("uac1"), TEXT(""), uacStopBuf, MAX_LOADSTRING, iniFile);
-						if (wcscmp((const wchar_t*)uacStopBuf, (const wchar_t*)TEXT("open")) == 0) {
-							stopAppElevated(&pro_info, 1);  // 提权：结束进程并清理计划任务，一次授权
-						} else {
-							stopApp(hdlg, &pro_info);
-						}
-						if (pro_info.dwProcessId == 0) {
-								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC1);
-								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
-								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START1);
-								SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"启动");
-							}
-							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
+					case IDC_PROXY_STOP1:
+						{
+							// 按启动时记录的 UAC 模式选择停止方式,避免两条路径重复提示授权
+							TCHAR uacStopBuf[MAX_LOADSTRING] = { 0 };
+							GetPrivateProfileString(TEXT("ProxyUI"), TEXT("uac1"), TEXT(""), uacStopBuf, MAX_LOADSTRING, iniFile);
+							BOOL uacStop = (wcscmp((const wchar_t*)uacStopBuf, (const wchar_t*)TEXT("open")) == 0);
+							// 放到工作线程执行,UI 不再卡顿
+							SetJobBusyUI(hdlg, 1, FALSE);
+							LaunchProxyJob(hdlg, 1, JOB_STOP, &pro_info, NULL, FALSE, uacStop);
 						}
 						break;
 					case IDC_PROXY_FILE2:
@@ -400,19 +438,13 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					case IDC_PROXY_START2:
 						{
 							clickStartApp2(hdlg);
-							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
 						}
 						break;
 					case IDC_PROXY_STOP2:
 						{
-							stopApp(hdlg, &pro_info2);
-							if (pro_info2.dwProcessId == 0) {
-								HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
-								SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"未运行");
-								HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
-								SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"启动");
-							}
-							BuildTrayIcon(GetParent(hdlg), NIM_MODIFY);
+							// 放到工作线程执行,UI 不再卡顿
+							SetJobBusyUI(hdlg, 2, FALSE);
+							LaunchProxyJob(hdlg, 2, JOB_STOP, &pro_info2, NULL, FALSE, FALSE);
 						}
 						break;
 				}
@@ -520,7 +552,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 					GetPrivateProfileString(TEXT("Program"), TEXT("param1"), TEXT(""), Param1, MAX_PATH, iniFile);
 					// 把程序路径用引号包裹，合并参数，避免缓冲区溢出
 					_snwprintf_s(cmdLineAuto, _countof(cmdLineAuto), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Param1);
-					startApp(hfDlg, &pro_info, cmdLineAuto, false, uacAuto);
+					LaunchProxyJob(hfDlg, 1, JOB_START, &pro_info, cmdLineAuto, false, uacAuto);
 			}
 		}
 		GetPrivateProfileString(TEXT("ProxyUI"), TEXT("auto2"), TEXT(""), autoBuf, MAX_LOADSTRING, iniFile);
@@ -529,7 +561,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			if (wcscmp((const wchar_t*)ProxyExe1, (const wchar_t*)TEXT("")) != 0) {
 				GetPrivateProfileString(TEXT("Program"), TEXT("param2"), TEXT(""), Param1, MAX_PATH, iniFile);
 				_snwprintf_s(cmdLineAuto, _countof(cmdLineAuto), _TRUNCATE, L"\"%s\" %s", ProxyExe1, Param1);
-				startApp(hfDlg, &pro_info2, cmdLineAuto, false, false);
+				LaunchProxyJob(hfDlg, 2, JOB_START, &pro_info2, cmdLineAuto, false, false);
 				}
 			}
 			// 显示dialog
@@ -1267,13 +1299,13 @@ void stopApp(HWND hWnd, PROCESS_INFORMATION* process)
 }
 
 
-// 开启代理2
+// 模拟启动应用窗口2
 void clickStartApp2(HWND hdlg)
 {
 	WCHAR ProxyExe2[MAX_PATH] = { 0 };
 	GetDlgItemText(hdlg, IDC_PROXY_CMD2, (LPTSTR)ProxyExe2, MAX_PATH);
 	if (wcscmp((const wchar_t*)ProxyExe2, (const wchar_t*)TEXT("")) == 0) {
-		MessageBox(hdlg, TEXT("先选择程序"), TEXT("失败"), MB_OK);
+		MessageBox(hdlg, TEXT("请选择程序"), TEXT("失败"), MB_OK);
 		return;
 	}
 	WritePrivateProfileString(TEXT("Program"), TEXT("app2"), ProxyExe2, iniFile);
@@ -1282,7 +1314,7 @@ void clickStartApp2(HWND hdlg)
 	GetDlgItemText(hdlg, IDC_EDIT4, (LPTSTR)Params, MAX_PATH);
 	WritePrivateProfileString(TEXT("Program"), TEXT("param2"), Params, iniFile);
 
-	// 环境选择记录下来
+	// 保存当前选择的环境记录
 	LRESULT idx_row;
 	WCHAR selectText[255] = { 0 };
 	HWND hComboBox = GetDlgItem(hdlg, IDC_SWITCH);
@@ -1290,20 +1322,80 @@ void clickStartApp2(HWND hdlg)
 	SendMessage(hComboBox, CB_GETLBTEXT, idx_row, (LPARAM)selectText);
 	WritePrivateProfileString(TEXT("Program"), TEXT("selected"), selectText, iniFile);
 
-	// 把程序路径用引号包裹，合并参数，避免缓冲区溢出
+	// 把程序路径用双引号包起来合并参数,避免缓冲区问题
 	WCHAR cmdLine2[MAX_PATH * 3] = { 0 };
 	_snwprintf_s(cmdLine2, _countof(cmdLine2), _TRUNCATE, L"\"%s\" %s", ProxyExe2, Params);
-	//MessageBox(hdlg, ProxyExe2, TEXT("失败"), MB_OK);
 
-	// 是否选中后台
+	// 是否勾选后台
 	UINT sta = IsDlgButtonChecked(hdlg, IDC_CHECK2);
-	BOOL ret = startApp(hdlg, &pro_info2, cmdLine2, sta == BST_UNCHECKED, false);
-	if (ret) {
-		HWND hStatus = GetDlgItem(hdlg, IDC_STATIC2);
-		SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)L"运行中");
-		HWND hBtn = GetDlgItem(hdlg, IDC_PROXY_START2);
-		SendMessage(hBtn, WM_SETTEXT, NULL, (LPARAM)L"重启");
+	// 放到工作线程执行,UI 不再卡顿
+	SetJobBusyUI(hdlg, 2, TRUE);
+	LaunchProxyJob(hdlg, 2, JOB_START, &pro_info2, cmdLine2, sta == BST_UNCHECKED, FALSE);
+}
+
+// 设置为忙碌状态:更新状态文字并禁用启动/停止按钮
+void SetJobBusyUI(HWND hdlg, int appId, BOOL starting)
+{
+	HWND hStatus = GetDlgItem(hdlg, (appId == 1) ? IDC_STATIC1 : IDC_STATIC2);
+	HWND hStart  = GetDlgItem(hdlg, (appId == 1) ? IDC_PROXY_START1 : IDC_PROXY_START2);
+	HWND hStop   = GetDlgItem(hdlg, (appId == 1) ? IDC_PROXY_STOP1 : IDC_PROXY_STOP2);
+	PROCESS_INFORMATION* pi = (appId == 1) ? &pro_info : &pro_info2;
+	LPCWSTR txt;
+	if (!starting) {
+		txt = L"停止中";
+	} else {
+		txt = (pi->dwProcessId > 0) ? L"重启中" : L"启动中";
 	}
+	SendMessage(hStatus, WM_SETTEXT, NULL, (LPARAM)txt);
+	EnableWindow(hStart, FALSE);
+	EnableWindow(hStop, FALSE);
+}
+
+// 工作线程:执行耗时的启动/停止,完成后回发 WM_APP_JOBDONE 由UI线程刷新界面
+static DWORD WINAPI AsyncJobProc(LPVOID param)
+{
+	AsyncJob* job = (AsyncJob*)param;
+	if (job->action == JOB_START) {
+		job->ok = startApp(job->hdlg, job->process, job->cmdLine, job->show, job->uac);
+	} else {
+		if (job->uac) {
+			stopAppElevated(job->process, job->appId);
+		} else {
+			stopApp(job->hdlg, job->process);
+		}
+		job->ok = (job->process->dwProcessId == 0);
+	}
+	PostMessage(job->hdlg, WM_APP_JOBDONE, (WPARAM)job, 0);
+	return 0;
+}
+
+// 发起异步任务;若该程序已有任务在跑则返回 FALSE(忽略本次)
+BOOL LaunchProxyJob(HWND hdlg, int appId, int action, PROCESS_INFORMATION* process, const WCHAR* cmdLine, BOOL show, BOOL uac)
+{
+	volatile LONG* busy = (appId == 1) ? &g_jobBusy1 : &g_jobBusy2;
+	if (InterlockedCompareExchange(busy, 1, 0) != 0) {
+		return FALSE;  // 已有任务在进行
+	}
+	AsyncJob* job = new AsyncJob();
+	job->appId = appId;
+	job->action = action;
+	job->process = process;
+	job->show = show;
+	job->uac = uac;
+	job->hdlg = hdlg;
+	job->ok = FALSE;
+	job->cmdLine[0] = 0;
+	if (cmdLine != NULL) {
+		wcscpy_s(job->cmdLine, _countof(job->cmdLine), cmdLine);
+	}
+	HANDLE hThread = CreateThread(NULL, 0, AsyncJobProc, job, 0, NULL);
+	if (hThread == NULL) {
+		delete job;
+		InterlockedExchange(busy, 0);
+		return FALSE;
+	}
+	CloseHandle(hThread);
+	return TRUE;
 }
 
 // 计划任务提权相关

@@ -44,4 +44,8 @@ BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam);
 void updateProxyText();
 // 模拟启动应用代理2
 void clickStartApp2(HWND hdlg);
+// 异步启动/停止任务(工作线程执行,避免UI卡顿)
+BOOL LaunchProxyJob(HWND hdlg, int appId, int action, PROCESS_INFORMATION* process, const WCHAR* cmdLine, BOOL show, BOOL uac);
+// 设置忙碌状态UI(状态文字/禁用按钮)
+void SetJobBusyUI(HWND hdlg, int appId, BOOL starting);
 void ErrorMessage(LPTSTR lpszFunction);
