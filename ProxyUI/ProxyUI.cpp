@@ -40,7 +40,7 @@ PROCESS_INFORMATION pro_info2; //进程信息
 
 #define WM_CLICKBIT (WM_USER + 1)
 
-HWND hWndComboBox, hWndBtn1;
+HWND hWndComboBox;
 HWND hfDlg;
 
 // 异步任务消息与常量
@@ -363,6 +363,44 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 				// 分析菜单选择: 
 				switch (wmId)
 				{
+					case IDC_PROXY_SERVER:
+						{
+							switch (HIWORD(wParam))
+							{
+							case CBN_SELCHANGE:
+								updateProxyText();
+								break;
+							}
+						}
+						break;
+					case IDC_SYSTEM_READ://读取最新系统代理
+						{
+							refreshSystemProxy(GetParent(hdlg));
+						}
+						break;
+					case IDC_SYSTEM_SET://设置代理
+						{
+							HWND hMain = GetParent(hdlg);
+							if (wcscmp((const wchar_t*)proxyText, (const wchar_t*)CloseProxy) == 0) {
+								if (DisableConnectionProxy(hMain, (LPWSTR)lanName)) {
+									BuildTrayIcon(hMain, NIM_MODIFY);
+									MessageBox(hMain, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
+								}
+								else {
+									ErrorMessage(TEXT("取消代理失败，请尝试右键->以管理员身份运行"));
+								}
+							}
+							else {
+								if (SetConnectionOptions(hMain, (LPWSTR)lanName, (LPWSTR)proxyText)) {
+									BuildTrayIcon(hMain, NIM_MODIFY);
+									MessageBox(hMain, (LPCWSTR)proxyText, TEXT("代理设置如下"), MB_OK);
+								}
+								else {
+									ErrorMessage(TEXT("代理设置失败，请尝试右键->以管理员身份运行"));
+								}
+							}
+						}
+						break;
 					case IDC_PROXY_FILE1:
 						{
 							selectApplication(hdlg, IDC_PROXY_CMD1);
@@ -477,17 +515,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
         break;
 	case WM_CREATE: // 先于InitInstance方法被调用
 		{
-			HWND hWndSys = CreateWindowEx(0, L"STATIC", L"系统代理",
-				WS_VISIBLE | WS_CHILD | WS_BORDER | SS_CENTER | SS_CENTERIMAGE,
-				10, 10, 98, 30,
-				hWnd, NULL, NULL, NULL);
+			// 先创建FORMVIEW，系统代理相关控件都在此dialog上
+			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, (DLGPROC)DlgProc);
+			
+			// 取IDC_PROXY_LIST的坐标后删除该占位控件
+			HWND hProxyList = GetDlgItem(hfDlg, IDC_PROXY_LIST);
+			RECT rcList;
+			GetWindowRect(hProxyList, &rcList);
+			MapWindowPoints(NULL, hfDlg, (LPPOINT)&rcList, 2);
+			DestroyWindow(hProxyList);
+			// 在IDC_PROXY_LIST原来的位置创建下拉框
 			hWndComboBox = CreateWindowEx(0, L"COMBOBOX", L"下拉框",
-				CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VISIBLE | WS_CHILD,
-				120, 10, 390, 500, hWnd, (HMENU)IDC_PROXY_SERVER, NULL, NULL);
-			hWndBtn1 = CreateWindowEx(0, L"BUTTON", L"确定",
-				WS_VISIBLE | WS_CHILD | WS_BORDER,
-				520, 10, 70, 30,
-				hWnd, (HMENU)IDC_PROXY_OK, NULL, NULL);
+				CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_VISIBLE | WS_CHILD,
+				rcList.left, rcList.top, rcList.right - rcList.left, 300,
+				hfDlg, (HMENU)IDC_PROXY_SERVER, hInst, NULL);
+			// 下拉框和IDC_SWITCH都用宋体10pt
+			HFONT hSongti10 = MakeSongtiFont(hfDlg, 10);
+			SendMessageW(hWndComboBox, WM_SETFONT, (WPARAM)hSongti10, TRUE);
+			SendMessageW(GetDlgItem(hfDlg, IDC_SWITCH), WM_SETFONT, (WPARAM)hSongti10, TRUE);
 			
 			// 添加默认代理选项
 			SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
@@ -527,14 +572,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			//更新变量
 			updateProxyText();
 			
-			// 插入FORMVIEW
-			hfDlg = CreateDialog(hInst, MAKEINTRESOURCE(IDD_FORMVIEW), hWnd, (DLGPROC)DlgProc);
-			
-			// 同步字体
-			HWND hBtn = GetDlgItem(hfDlg, IDC_PROXY_START1);
-			HFONT hChildFont = (HFONT)SendMessage(hBtn, WM_GETFONT, 0, 0);
-			SendMessageW(hWndSys, WM_SETFONT, (WPARAM)(hChildFont), 0);
-			SendMessageW(hWndBtn1, WM_SETFONT, (WPARAM)(hChildFont), 0);
 
 			// 自动开启服务
 			WCHAR ProxyExe1[MAX_PATH] = { 0 };
@@ -576,38 +613,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // 分析菜单选择: 
             switch (wmId)
             {
-			case IDC_PROXY_SERVER:
-				{
-					switch (HIWORD(wParam))
-					{
-					case CBN_SELCHANGE:
-						updateProxyText();
-						break;
-					}
-				}
-				break;
-			case IDC_PROXY_OK://设置代理
-				{
-					if (wcscmp((const wchar_t*)proxyText, (const wchar_t*)CloseProxy) == 0) {
-						if (DisableConnectionProxy(hWnd, (LPWSTR)lanName)) {
-							BuildTrayIcon(hWnd, NIM_MODIFY);
-							MessageBox(hWnd, TEXT("已成功取消代理"), TEXT("成功"), MB_OK);
-						}
-						else {
-							ErrorMessage(TEXT("取消代理失败，请尝试右键->以管理员身份运行"));
-						}
-					}
-					else {
-						if (SetConnectionOptions(hWnd, (LPWSTR)lanName, (LPWSTR)proxyText)) {
-							BuildTrayIcon(hWnd, NIM_MODIFY);
-							MessageBox(hWnd, (LPCWSTR)proxyText, TEXT("代理设置如下"), MB_OK);
-						}
-						else {
-							ErrorMessage(TEXT("代理设置失败，请尝试右键->以管理员身份运行"));
-						}
-					}
-				}
-				break;
 			case IDM_START:
 				{
 					BOOL AutoStart = false;
@@ -1096,6 +1101,43 @@ void updateProxyText()
 	LRESULT idx_row;
 	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
 	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)proxyText);
+}
+
+// 创建指定磅值的宋体字体
+HFONT MakeSongtiFont(HWND hRefWnd, int pt)
+{
+	HDC hdc = GetDC(hRefWnd);
+	int h = -MulDiv(pt, GetDeviceCaps(hdc, LOGPIXELSY), 72);
+	ReleaseDC(hRefWnd, hdc);
+	return CreateFont(h, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+		GB2312_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
+		DEFAULT_PITCH | FF_DONTCARE, L"宋体");
+}
+
+// 读取最新系统代理并同步到下拉框
+void refreshSystemProxy(HWND hMainWnd)
+{
+	// 先默认为无代理，若系统未设代理则保持此值
+	wcscpy_s(proxyText, _countof(proxyText), CloseProxy);
+	// 重新读取当前系统代理到全局proxyText
+	GetConnectProxy(hMainWnd, (LPWSTR)lanName);
+	// 在下拉框里查找匹配项
+	int count = (int)SendMessage(hWndComboBox, CB_GETCOUNT, 0, 0);
+	int sel = -1;
+	for (int k = 0; k < count; k++) {
+		WCHAR item[maxLen] = { 0 };
+		SendMessage(hWndComboBox, CB_GETLBTEXT, k, (LPARAM)item);
+		if (wcscmp((const wchar_t*)item, (const wchar_t*)proxyText) == 0) {
+			sel = k;
+			break;
+		}
+	}
+	if (sel < 0) {
+		// 没有匹配项则新增一条并选中
+		sel = (int)SendMessage(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)proxyText);
+	}
+	SendMessage(hWndComboBox, CB_SETCURSEL, sel, 0);
+	updateProxyText();
 }
 
 // 选择文件

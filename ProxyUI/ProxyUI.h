@@ -42,6 +42,10 @@ BOOL ScheduledTaskExists(LPCWSTR taskName);
 BOOL CALLBACK TerminateAppEnum(HWND hwnd, LPARAM lParam);
 // 更新全局变量
 void updateProxyText();
+// 读取最新系统代理并同步到下拉框
+void refreshSystemProxy(HWND hMainWnd);
+// 创建指定磅值的宋体字体
+HFONT MakeSongtiFont(HWND hRefWnd, int pt);
 // 模拟启动应用代理2
 void clickStartApp2(HWND hdlg);
 // 异步启动/停止任务(工作线程执行,避免UI卡顿)
