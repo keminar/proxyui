@@ -528,8 +528,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_GETMINMAXINFO:
         {
             LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-            lpMMI->ptMaxTrackSize.x = 800;
-            lpMMI->ptMaxTrackSize.y = 600;
+			// 上限用系统默认最大跟踪尺寸，避免高DPI下窗口被截断
+			lpMMI->ptMaxTrackSize.x = GetSystemMetrics(SM_CXMAXTRACK);			lpMMI->ptMaxTrackSize.y = GetSystemMetrics(SM_CYMAXTRACK);
         }
         break;
 	case WM_CREATE: // 先于InitInstance方法被调用
@@ -620,6 +620,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				LaunchProxyJob(hfDlg, 2, JOB_START, &pro_info2, cmdLineAuto, false, false);
 				}
 			}
+			// 按hfDlg实际像素大小(不同电脑DPI/字体不同)反推并调整主窗口大小
+			RECT rcDlg;
+			GetWindowRect(hfDlg, &rcDlg);
+			RECT rcWin = { 0, 0, rcDlg.right - rcDlg.left, rcDlg.bottom - rcDlg.top };
+			DWORD dwStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_STYLE);
+			DWORD dwExStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_EXSTYLE);
+			AdjustWindowRectEx(&rcWin, dwStyle, GetMenu(hWnd) != NULL, dwExStyle);
+			SetWindowPos(hWnd, NULL, 0, 0, rcWin.right - rcWin.left, rcWin.bottom - rcWin.top, SWP_NOMOVE | SWP_NOZORDER);
+			
 			// 显示dialog
 			ShowWindow(hfDlg, SW_SHOW);
 			// 显示托盘
@@ -1136,11 +1145,22 @@ HFONT MakeSongtiFont(HWND hRefWnd, int pt)
 // 读取最新系统代理并同步到下拉框
 void refreshSystemProxy(HWND hMainWnd)
 {
+	// 重新加载下拉框内容：清空后按ini的[Server]List重填
+	SendMessage(hWndComboBox, CB_RESETCONTENT, 0, 0);
+	SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)CloseProxy);
+	TCHAR inBuf[maxLen] = { 0 };
+	GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), inBuf, maxLen, iniFile);
+	wchar_t *buffer;
+	wchar_t *token = wcstok_s(inBuf, L"|", &buffer);
+	while (token) {
+		SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)token);
+		token = wcstok_s(NULL, L"|", &buffer);
+	}
 	// 先默认为无代理，若系统未设代理则保持此值
 	wcscpy_s(proxyText, _countof(proxyText), CloseProxy);
 	// 重新读取当前系统代理到全局proxyText
 	GetConnectProxy(hMainWnd, (LPWSTR)lanName);
-	// 在下拉框里查找匹配项
+	// 在下拉框里查找匹配项，没有则新增一条
 	int count = (int)SendMessage(hWndComboBox, CB_GETCOUNT, 0, 0);
 	int sel = -1;
 	for (int k = 0; k < count; k++) {
@@ -1152,7 +1172,6 @@ void refreshSystemProxy(HWND hMainWnd)
 		}
 	}
 	if (sel < 0) {
-		// 没有匹配项则新增一条并选中
 		sel = (int)SendMessage(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)proxyText);
 	}
 	SendMessage(hWndComboBox, CB_SETCURSEL, sel, 0);
