@@ -381,6 +381,11 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 					case IDC_SYSTEM_SET://设置代理
 						{
 							HWND hMain = GetParent(hdlg);
+							// 读取下拉框当前文本(选中的或手动输入的)
+							GetWindowTextW(hWndComboBox, proxyText, _countof(proxyText));
+							if (wcscmp((const wchar_t*)proxyText, (const wchar_t*)TEXT("")) == 0) {
+								break;
+							}
 							if (wcscmp((const wchar_t*)proxyText, (const wchar_t*)CloseProxy) == 0) {
 								if (DisableConnectionProxy(hMain, (LPWSTR)lanName)) {
 									BuildTrayIcon(hMain, NIM_MODIFY);
@@ -391,6 +396,20 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 								}
 							}
 							else {
+								// 手动输入的新代理若不在列表则添加为下拉项并写入ini
+								if (SendMessageW(hWndComboBox, CB_FINDSTRINGEXACT, (WPARAM)-1, (LPARAM)proxyText) == CB_ERR) {
+									SendMessageW(hWndComboBox, CB_ADDSTRING, 0, (LPARAM)proxyText);
+									TCHAR listBuf[maxLen] = { 0 };
+									GetPrivateProfileString(TEXT("Server"), TEXT("List"), TEXT(""), listBuf, maxLen, iniFile);
+									TCHAR newList[maxLen] = { 0 };
+									if (wcslen((const wchar_t*)listBuf) > 0) {
+										_snwprintf_s(newList, _countof(newList), _TRUNCATE, L"%s|%s", listBuf, proxyText);
+									}
+									else {
+										wcscpy_s(newList, _countof(newList), proxyText);
+									}
+									WritePrivateProfileString(TEXT("Server"), TEXT("List"), newList, iniFile);
+								}
 								if (SetConnectionOptions(hMain, (LPWSTR)lanName, (LPWSTR)proxyText)) {
 									BuildTrayIcon(hMain, NIM_MODIFY);
 									MessageBox(hMain, (LPCWSTR)proxyText, TEXT("代理设置如下"), MB_OK);
@@ -526,7 +545,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			DestroyWindow(hProxyList);
 			// 在IDC_PROXY_LIST原来的位置创建下拉框
 			hWndComboBox = CreateWindowEx(0, L"COMBOBOX", L"下拉框",
-				CBS_DROPDOWNLIST | CBS_HASSTRINGS | WS_VSCROLL | WS_VISIBLE | WS_CHILD,
+				CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL | WS_VISIBLE | WS_CHILD,
 				rcList.left, rcList.top, rcList.right - rcList.left, 300,
 				hfDlg, (HMENU)IDC_PROXY_SERVER, hInst, NULL);
 			// 下拉框和IDC_SWITCH都用宋体10pt
