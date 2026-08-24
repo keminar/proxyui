@@ -621,9 +621,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				}
 			}
 			// 按hfDlg实际像素大小(不同电脑DPI/字体不同)反推并调整主窗口大小
+			// 让右、下与左、上留同样间距(hfDlg在客户区的偏移)，四周对称
 			RECT rcDlg;
 			GetWindowRect(hfDlg, &rcDlg);
-			RECT rcWin = { 0, 0, rcDlg.right - rcDlg.left, rcDlg.bottom - rcDlg.top };
+			POINT ptDlg = { rcDlg.left, rcDlg.top };
+			ScreenToClient(hWnd, &ptDlg);
+			int marginX = ptDlg.x;
+			int marginY = ptDlg.y;
+			int clientW = marginX + (rcDlg.right - rcDlg.left) + marginX;
+			int clientH = marginY + (rcDlg.bottom - rcDlg.top) + marginY;
+			RECT rcWin = { 0, 0, clientW, clientH };
 			DWORD dwStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_STYLE);
 			DWORD dwExStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_EXSTYLE);
 			AdjustWindowRectEx(&rcWin, dwStyle, GetMenu(hWnd) != NULL, dwExStyle);
