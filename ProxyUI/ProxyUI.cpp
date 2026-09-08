@@ -43,6 +43,15 @@ PROCESS_INFORMATION pro_info2; //进程信息
 HWND hWndComboBox;
 HWND hfDlg;
 
+// 主窗口应有的尺寸(像素),在WM_CREATE里按对话框实际大小算出
+// 用于限制最大化后的尺寸,以及托盘还原时把被外部撑大的窗口拉回来
+int g_mainWinW = 0;
+int g_mainWinH = 0;
+
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
 // 异步任务消息与常量
 #define WM_APP_JOBDONE (WM_APP + 10)  // 工作线程完成后回发
 #define JOB_START 1
@@ -511,6 +520,31 @@ LRESULT CALLBACK DlgProc(HWND hdlg, UINT message, WPARAM wParam, LPARAM lParam)
 	return 0;
 }
 #include <windows.h>
+// 按hfDlg实际像素大小(不同电脑DPI/字体不同)反推并调整主窗口大小
+// 让右、下与左、上留同样间距(hfDlg在客户区的偏移)，四周对称
+// 算出的尺寸记到g_mainWinW/g_mainWinH,供限制最大化和托盘还原时复用
+void FitMainWindow(HWND hWnd)
+{
+	if (hfDlg == NULL) {
+		return;
+	}
+	RECT rcDlg;
+	GetWindowRect(hfDlg, &rcDlg);
+	POINT ptDlg = { rcDlg.left, rcDlg.top };
+	ScreenToClient(hWnd, &ptDlg);
+	int marginX = ptDlg.x;
+	int marginY = ptDlg.y;
+	int clientW = marginX + (rcDlg.right - rcDlg.left) + marginX;
+	int clientH = marginY + (rcDlg.bottom - rcDlg.top) + marginY;
+	RECT rcWin = { 0, 0, clientW, clientH };
+	DWORD dwStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_STYLE);
+	DWORD dwExStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_EXSTYLE);
+	AdjustWindowRectEx(&rcWin, dwStyle, GetMenu(hWnd) != NULL, dwExStyle);
+	g_mainWinW = rcWin.right - rcWin.left;
+	g_mainWinH = rcWin.bottom - rcWin.top;
+	SetWindowPos(hWnd, NULL, 0, 0, g_mainWinW, g_mainWinH, SWP_NOMOVE | SWP_NOZORDER);
+}
+
 //
 //  函数: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -528,10 +562,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     case WM_GETMINMAXINFO:
         {
             LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
-			// 上限用系统默认最大跟踪尺寸，避免高DPI下窗口被截断
-			lpMMI->ptMaxTrackSize.x = GetSystemMetrics(SM_CXMAXTRACK);			lpMMI->ptMaxTrackSize.y = GetSystemMetrics(SM_CYMAXTRACK);
+			if (g_mainWinW > 0 && g_mainWinH > 0) {
+				// 去掉WS_MAXIMIZEBOX只是隐藏了最大化按钮,外部程序仍能把窗口最大化,
+				// 这里把最大化后的尺寸也限死成正常尺寸,窗口就不会变全屏
+				RECT rcCur;
+				GetWindowRect(hWnd, &rcCur);
+				lpMMI->ptMaxPosition.x = rcCur.left;
+				lpMMI->ptMaxPosition.y = rcCur.top;
+				lpMMI->ptMaxSize.x = g_mainWinW;
+				lpMMI->ptMaxSize.y = g_mainWinH;
+				lpMMI->ptMaxTrackSize.x = g_mainWinW;
+				lpMMI->ptMaxTrackSize.y = g_mainWinH;
+			}
+			else {
+				// 尺寸还没算出来(WM_CREATE之前)时,上限用系统默认最大跟踪尺寸，避免高DPI下窗口被截断
+				lpMMI->ptMaxTrackSize.x = GetSystemMetrics(SM_CXMAXTRACK);
+				lpMMI->ptMaxTrackSize.y = GetSystemMetrics(SM_CYMAXTRACK);
+			}
         }
         break;
+	case WM_SYSCOMMAND:
+		// 真正禁止最大化:外部程序或工具发来的SC_MAXIMIZE直接吞掉
+		// (本窗口没有WS_THICKFRAME,一旦被撑大用户没法用鼠标拉回来)
+		if ((wParam & 0xFFF0) == SC_MAXIMIZE) {
+			return 0;
+		}
+		return DefWindowProc(hWnd, message, wParam, lParam);
+	case WM_DPICHANGED:
+		// 系统缩放变化时按新DPI重算一次尺寸(进程声明DPI感知后才会收到此消息)
+		FitMainWindow(hWnd);
+		break;
 	case WM_CREATE: // 先于InitInstance方法被调用
 		{
 			// 先创建FORMVIEW，系统代理相关控件都在此dialog上
@@ -544,9 +604,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			MapWindowPoints(NULL, hfDlg, (LPPOINT)&rcList, 2);
 			DestroyWindow(hProxyList);
 			// 在IDC_PROXY_LIST原来的位置创建下拉框
+			// 组合框建窗时传的高度是"展开后"的总高度,按DPI缩放,否则高缩放下拉列表会显得很矮
+			int dropHeight = ScaleForDpi(hfDlg, 300);
 			hWndComboBox = CreateWindowEx(0, L"COMBOBOX", L"下拉框",
 				CBS_DROPDOWN | CBS_HASSTRINGS | WS_VSCROLL | WS_VISIBLE | WS_CHILD,
-				rcList.left, rcList.top, rcList.right - rcList.left, 300,
+				rcList.left, rcList.top, rcList.right - rcList.left, dropHeight,
 				hfDlg, (HMENU)IDC_PROXY_SERVER, hInst, NULL);
 			// 下拉框和IDC_SWITCH都用宋体10pt
 			HFONT hSongti10 = MakeSongtiFont(hfDlg, 10);
@@ -620,21 +682,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				LaunchProxyJob(hfDlg, 2, JOB_START, &pro_info2, cmdLineAuto, false, false);
 				}
 			}
-			// 按hfDlg实际像素大小(不同电脑DPI/字体不同)反推并调整主窗口大小
-			// 让右、下与左、上留同样间距(hfDlg在客户区的偏移)，四周对称
-			RECT rcDlg;
-			GetWindowRect(hfDlg, &rcDlg);
-			POINT ptDlg = { rcDlg.left, rcDlg.top };
-			ScreenToClient(hWnd, &ptDlg);
-			int marginX = ptDlg.x;
-			int marginY = ptDlg.y;
-			int clientW = marginX + (rcDlg.right - rcDlg.left) + marginX;
-			int clientH = marginY + (rcDlg.bottom - rcDlg.top) + marginY;
-			RECT rcWin = { 0, 0, clientW, clientH };
-			DWORD dwStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_STYLE);
-			DWORD dwExStyle = (DWORD)GetWindowLongPtr(hWnd, GWL_EXSTYLE);
-			AdjustWindowRectEx(&rcWin, dwStyle, GetMenu(hWnd) != NULL, dwExStyle);
-			SetWindowPos(hWnd, NULL, 0, 0, rcWin.right - rcWin.left, rcWin.bottom - rcWin.top, SWP_NOMOVE | SWP_NOZORDER);
+			// 按对话框实际大小调整主窗口尺寸(并记下正常尺寸)
+			FitMainWindow(hWnd);
 			
 			// 显示dialog
 			ShowWindow(hfDlg, SW_SHOW);
@@ -776,7 +825,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 		switch (lParam)
 		{
 		case WM_LBUTTONUP://托盘图标还原窗口
-			ShowWindow(hWnd, SW_SHOWNORMAL);
+			// 先取消最大化,再按正常尺寸摆一次:
+			// 万一窗口被外部撑大,这里就是唯一能拉回来的出口(窗口没有可拖动的边框)
+			if (IsZoomed(hWnd)) {
+				ShowWindow(hWnd, SW_RESTORE);
+			}
+			else {
+				ShowWindow(hWnd, SW_SHOWNORMAL);
+			}
+			FitMainWindow(hWnd);
 			::SetForegroundWindow(hWnd);
 			break;
 		case WM_RBUTTONDOWN:
@@ -1136,6 +1193,19 @@ void updateProxyText()
 	LRESULT idx_row;
 	idx_row = SendMessage(hWndComboBox, CB_GETCURSEL, 0, 0);
 	SendMessage(hWndComboBox, CB_GETLBTEXT, idx_row, (LPARAM)proxyText);
+}
+
+// 把96DPI下的设计像素值换算成当前DPI的像素值
+// (程序已声明DPI感知,高缩放下GetDeviceCaps拿到的是真实DPI)
+int ScaleForDpi(HWND hRefWnd, int px96)
+{
+	HDC hdc = GetDC(hRefWnd);
+	int dpiY = GetDeviceCaps(hdc, LOGPIXELSY);
+	ReleaseDC(hRefWnd, hdc);
+	if (dpiY <= 0) {
+		dpiY = 96;
+	}
+	return MulDiv(px96, dpiY, 96);
 }
 
 // 创建指定磅值的宋体字体
